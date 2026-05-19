@@ -1,0 +1,20 @@
+{
+    "name": "jijonline/skwirrel-gavilar",
+    "description": "Sync products from Skwirrel PIM into a custom post type on the Gavilar WordPress site.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "php-stubs/wordpress-stubs": "^6.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "JijOnline\\SkwirrelGavilar\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
