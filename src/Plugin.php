@@ -8,6 +8,7 @@ use JijOnline\SkwirrelGavilar\Api\Client;
 use JijOnline\SkwirrelGavilar\Api\OAuthTokenStore;
 use JijOnline\SkwirrelGavilar\Cpt\CategoryTaxonomy;
 use JijOnline\SkwirrelGavilar\Cpt\ProductPostType;
+use JijOnline\SkwirrelGavilar\I18n\Polylang;
 use JijOnline\SkwirrelGavilar\Mapping\AttachmentMapper;
 use JijOnline\SkwirrelGavilar\Mapping\CategoryMapper;
 use JijOnline\SkwirrelGavilar\Mapping\FeatureMapper;
@@ -38,6 +39,7 @@ final class Plugin
 
     private Client $client;
     private SyncCoordinator $coordinator;
+    private Polylang $polylang;
 
     private function register(): void
     {
@@ -45,7 +47,7 @@ final class Plugin
 
         (new ProductPostType())->register();
         (new CategoryTaxonomy())->register();
-        (new SettingsPage($this->client, $this->coordinator))->register();
+        (new SettingsPage($this->client, $this->coordinator, $this->polylang))->register();
 
         add_action(self::DAILY_HOOK, function (): void {
             $this->coordinator->run();
@@ -62,12 +64,18 @@ final class Plugin
         $tokenStore = new OAuthTokenStore($settings);
         $this->client = new Client($settings, $tokenStore, $logger);
 
-        $categoryMapper = new CategoryMapper();
+        $this->polylang = new Polylang($settings);
+        $categoryMapper = new CategoryMapper($this->polylang);
         $featureMapper = new FeatureMapper();
         $attachmentMapper = new AttachmentMapper($logger);
-        $productMapper = new ProductMapper($categoryMapper, $featureMapper, $attachmentMapper, $logger);
+        $productMapper = new ProductMapper($categoryMapper, $featureMapper, $attachmentMapper, $this->polylang, $logger);
 
         $this->coordinator = new SyncCoordinator($this->client, $productMapper, $settings, $logger);
+    }
+
+    public function polylang(): Polylang
+    {
+        return $this->polylang;
     }
 
     public function coordinator(): SyncCoordinator

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace JijOnline\SkwirrelGavilar\Admin;
 
 use JijOnline\SkwirrelGavilar\Api\Client;
+use JijOnline\SkwirrelGavilar\I18n\Polylang;
 use JijOnline\SkwirrelGavilar\Support\Settings;
 use JijOnline\SkwirrelGavilar\Sync\SyncCoordinator;
 
@@ -18,6 +19,7 @@ final class SettingsPage
     public function __construct(
         private readonly Client $client,
         private readonly SyncCoordinator $coordinator,
+        private readonly Polylang $polylang,
     ) {}
 
     public function register(): void
@@ -27,6 +29,8 @@ final class SettingsPage
         add_action('admin_notices', [$this, 'maybeRenderNotice']);
         add_action('admin_post_skwirrel_gavilar_test_connection', [$this, 'handleTestConnection']);
         add_action('admin_post_skwirrel_gavilar_sync_now', [$this, 'handleSyncNow']);
+        add_action('admin_post_skwirrel_gavilar_detect_locales', [$this, 'handleDetectLocales']);
+        add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
     }
 
     public function maybeRenderNotice(): void
@@ -93,8 +97,8 @@ final class SettingsPage
         <div class="wrap">
             <h1><?php esc_html_e('Skwirrel Sync for Gavilar', 'skwirrel-gavilar'); ?></h1>
 
-            <?php if (!function_exists('pll_languages_list')): ?>
-                <div class="notice notice-warning"><p><?php esc_html_e('Polylang Pro is not active. Multilingual sync will be skipped until it is installed and configured.', 'skwirrel-gavilar'); ?></p></div>
+            <?php if (!$this->polylang->isActive()): ?>
+                <div class="notice notice-error"><p><strong><?php esc_html_e('Polylang Pro is required.', 'skwirrel-gavilar'); ?></strong> <?php esc_html_e('The sync will fall back to a single-language mode (default WP locale) until Polylang Pro is activated and languages are configured.', 'skwirrel-gavilar'); ?></p></div>
             <?php endif; ?>
 
             <form method="post" action="options.php">
@@ -134,6 +138,18 @@ final class SettingsPage
             </form>
 
             <hr>
+            <h2><?php esc_html_e('Locale mapping', 'skwirrel-gavilar'); ?></h2>
+            <p class="description"><?php esc_html_e('Maps Skwirrel locale codes (e.g. nl_NL) to Polylang language slugs (e.g. nl). Use "Auto-detect locales" to pre-fill from a live API call, then adjust if needed.', 'skwirrel-gavilar'); ?></p>
+
+            <?php $this->renderLocaleMap($settings); ?>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
+                <?php wp_nonce_field(self::NONCE_ACTION); ?>
+                <input type="hidden" name="action" value="skwirrel_gavilar_detect_locales">
+                <?php submit_button(__('Auto-detect locales', 'skwirrel-gavilar'), 'secondary', 'submit', false); ?>
+            </form>
+
+            <hr>
             <h2><?php esc_html_e('Sync', 'skwirrel-gavilar'); ?></h2>
             <p>
                 <?php if ($lastSynced): ?>
@@ -155,6 +171,52 @@ final class SettingsPage
                 <?php submit_button(__('Sync now (delta)', 'skwirrel-gavilar'), 'primary', 'submit', false); ?>
             </form>
         </div>
+        <?php
+    }
+
+    private function renderLocaleMap(Settings $settings): void
+    {
+        $map = $settings->localeMap();
+        $polylangActive = $this->polylang->isActive();
+        $polylangSlugs = $polylangActive ? $this->polylang->languages() : [];
+
+        if (empty($map)) {
+            echo '<p><em>' . esc_html__('No locale mapping yet. Click "Auto-detect locales" to populate it.', 'skwirrel-gavilar') . '</em></p>';
+            return;
+        }
+        ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <?php wp_nonce_field(self::NONCE_ACTION); ?>
+            <input type="hidden" name="action" value="skwirrel_gavilar_save_locale_map">
+            <table class="widefat striped" style="max-width:600px;">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('Skwirrel locale code', 'skwirrel-gavilar'); ?></th>
+                        <th><?php esc_html_e('Polylang language slug', 'skwirrel-gavilar'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($map as $skwirrelCode => $pllSlug): ?>
+                        <tr>
+                            <td><code><?php echo esc_html($skwirrelCode); ?></code></td>
+                            <td>
+                                <?php if ($polylangActive): ?>
+                                    <select name="locale_map[<?php echo esc_attr($skwirrelCode); ?>]">
+                                        <option value="">— <?php esc_html_e('Skip', 'skwirrel-gavilar'); ?> —</option>
+                                        <?php foreach ($polylangSlugs as $slug): ?>
+                                            <option value="<?php echo esc_attr($slug); ?>" <?php selected($pllSlug, $slug); ?>><?php echo esc_html($slug); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <?php else: ?>
+                                    <input type="text" name="locale_map[<?php echo esc_attr($skwirrelCode); ?>]" value="<?php echo esc_attr($pllSlug); ?>">
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php submit_button(__('Save locale mapping', 'skwirrel-gavilar'), 'secondary'); ?>
+        </form>
         <?php
     }
 
@@ -206,5 +268,129 @@ final class SettingsPage
 
         wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
         exit;
+    }
+
+    public function handleDetectLocales(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        try {
+            $detected = $this->detectLocales();
+            $settings = new Settings();
+            $existing = $settings->localeMap();
+
+            // Merge: pre-fill missing entries with auto-resolved Polylang slugs; keep manual overrides.
+            $merged = $existing;
+            foreach ($detected as $code) {
+                if (!array_key_exists($code, $merged)) {
+                    $merged[$code] = $this->polylang->resolveSlug($code) ?? '';
+                }
+            }
+            $settings->setLocaleMap($merged);
+
+            $notice = sprintf(
+                /* translators: 1: number of detected codes, 2: comma-separated list */
+                __('Detected %1$d Skwirrel locale code(s): %2$s. Review the mapping below.', 'skwirrel-gavilar'),
+                count($detected),
+                implode(', ', $detected)
+            );
+            set_transient('skwirrel_gavilar_admin_notice', ['type' => 'success', 'message' => $notice], 30);
+        } catch (\Throwable $e) {
+            set_transient('skwirrel_gavilar_admin_notice', ['type' => 'error', 'message' => $e->getMessage()], 30);
+        }
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
+    }
+
+    public function handleSaveLocaleMap(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        $input = $_POST['locale_map'] ?? [];
+        $sanitised = [];
+        if (is_array($input)) {
+            foreach ($input as $code => $slug) {
+                $code = sanitize_text_field((string) $code);
+                $slug = sanitize_text_field((string) $slug);
+                if ($code !== '') {
+                    $sanitised[$code] = $slug;
+                }
+            }
+        }
+
+        (new Settings())->setLocaleMap($sanitised);
+        set_transient('skwirrel_gavilar_admin_notice', [
+            'type' => 'success',
+            'message' => __('Locale mapping saved.', 'skwirrel-gavilar'),
+        ], 30);
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
+    }
+
+    /**
+     * Discover Skwirrel locale codes by inspecting one product's translations + languages list.
+     *
+     * @return string[] de-duped locale codes
+     */
+    private function detectLocales(): array
+    {
+        $codes = [];
+
+        // First attempt: ask Skwirrel for its language list directly if such a method exists.
+        try {
+            $langResult = $this->client->call('getLanguages', []);
+            $list = is_array($langResult) ? ($langResult['languages'] ?? $langResult) : [];
+            if (is_array($list)) {
+                foreach ($list as $entry) {
+                    $code = is_array($entry)
+                        ? (string) ($entry['code'] ?? $entry['locale'] ?? '')
+                        : (string) $entry;
+                    if ($code !== '') {
+                        $codes[$code] = true;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // Endpoint may not exist on this tenant — fall through to product inspection.
+        }
+
+        // Fallback: pull one product with translations and inspect.
+        if (empty($codes)) {
+            $result = $this->client->call('getProducts', [
+                'page' => 1,
+                'limit' => 1,
+                'include_product_translations' => true,
+                'include_languages' => true,
+            ]);
+            $products = is_array($result) ? ($result['products'] ?? $result) : [];
+            $first = is_array($products) && !empty($products) ? $products[0] : null;
+
+            if (is_array($first)) {
+                foreach ((array) ($first['translations'] ?? []) as $key => $translation) {
+                    $code = is_array($translation) ? (string) ($translation['locale'] ?? $translation['context'] ?? $key) : (string) $key;
+                    if ($code !== '') {
+                        $codes[$code] = true;
+                    }
+                }
+            }
+            if (is_array($result) && isset($result['languages']) && is_array($result['languages'])) {
+                foreach ($result['languages'] as $entry) {
+                    $code = is_array($entry) ? (string) ($entry['code'] ?? $entry['locale'] ?? '') : (string) $entry;
+                    if ($code !== '') {
+                        $codes[$code] = true;
+                    }
+                }
+            }
+        }
+
+        return array_keys($codes);
     }
 }

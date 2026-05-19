@@ -120,7 +120,8 @@ final class SyncCoordinator
             try {
                 $r = $this->productMapper->upsert($product, $runId, $categoriesById);
                 $processed++;
-                $r['created'] ? $created++ : $updated++;
+                $created += (int) ($r['created'] ?? 0);
+                $updated += (int) ($r['updated'] ?? 0);
             } catch (\Throwable $e) {
                 $errors++;
                 $this->logger->error('Product upsert failed', [
