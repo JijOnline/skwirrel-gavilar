@@ -33,6 +33,7 @@ final class SettingsPage
         add_action('admin_post_skwirrel_gavilar_detect_locales', [$this, 'handleDetectLocales']);
         add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
         add_action('admin_post_skwirrel_gavilar_reset_cursor', [$this, 'handleResetCursor']);
+        add_action('admin_post_skwirrel_gavilar_list_selections', [$this, 'handleListSelections']);
     }
 
     public function maybeRenderNotice(): void
@@ -132,12 +133,20 @@ final class SettingsPage
                         <th><label for="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>"><?php esc_html_e('Dynamic selection ID', 'skwirrel-gavilar'); ?></label></th>
                         <td>
                             <input type="number" min="0" id="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>" name="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>" value="<?php echo esc_attr((string) $settings->dynamicSelectionId()); ?>">
-                            <p class="description"><?php esc_html_e('The Skwirrel selection that gates which products sync to this site.', 'skwirrel-gavilar'); ?></p>
+                            <p class="description"><?php esc_html_e('The Skwirrel selection that gates which products sync to this site. Click "List selections" below after entering credentials to discover the ID.', 'skwirrel-gavilar'); ?></p>
                         </td>
                     </tr>
                 </table>
                 <?php submit_button(); ?>
             </form>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:-1em; margin-bottom:1em;">
+                <?php wp_nonce_field(self::NONCE_ACTION); ?>
+                <input type="hidden" name="action" value="skwirrel_gavilar_list_selections">
+                <?php submit_button(__('List selections', 'skwirrel-gavilar'), 'secondary small', 'submit', false); ?>
+            </form>
+
+            <?php $this->renderSelectionsCache(); ?>
 
             <hr>
             <h2><?php esc_html_e('Locale mapping', 'skwirrel-gavilar'); ?></h2>
@@ -366,6 +375,38 @@ final class SettingsPage
         <?php
     }
 
+    private function renderSelectionsCache(): void
+    {
+        $cache = get_transient('skwirrel_gavilar_selections_cache');
+        if (!is_array($cache) || empty($cache['selections'])) {
+            return;
+        }
+        ?>
+        <div style="padding:1em; background:#f6f7f7; border-left:4px solid #2271b1; max-width:600px; margin-bottom:1em;">
+            <p style="margin-top:0;"><strong><?php esc_html_e('Selections discovered', 'skwirrel-gavilar'); ?></strong>
+                <small style="color:#777;">(<?php echo esc_html((string) ($cache['method'] ?? '')); ?>)</small>
+            </p>
+            <table class="widefat striped">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('ID', 'skwirrel-gavilar'); ?></th>
+                        <th><?php esc_html_e('Name', 'skwirrel-gavilar'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ((array) $cache['selections'] as $sel): ?>
+                        <tr>
+                            <td><code><?php echo (int) ($sel['id'] ?? 0); ?></code></td>
+                            <td><?php echo esc_html((string) ($sel['name'] ?? '')); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p class="description" style="margin-bottom:0;"><?php esc_html_e('Paste the ID into "Dynamic selection ID" above and save. Cached for 5 minutes.', 'skwirrel-gavilar'); ?></p>
+        </div>
+        <?php
+    }
+
     private function renderLocaleMap(Settings $settings): void
     {
         $map = $settings->localeMap();
@@ -525,6 +566,111 @@ final class SettingsPage
 
         wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
         exit;
+    }
+
+    public function handleListSelections(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        $candidates = [
+            'getDynamicSelections',
+            'getDynamicSelection',
+            'getSelections',
+            'getSelection',
+            'getDynamicSelectionList',
+            'getSelectionList',
+            'listDynamicSelections',
+            'listSelections',
+        ];
+
+        $selections = null;
+        $usedMethod = null;
+        $lastError = '';
+
+        foreach ($candidates as $method) {
+            try {
+                $result = $this->client->call($method, []);
+                $list = $this->extractSelectionList($result);
+                if (!empty($list)) {
+                    $selections = $list;
+                    $usedMethod = $method;
+                    break;
+                }
+            } catch (\Throwable $e) {
+                $lastError = $e->getMessage();
+            }
+        }
+
+        if ($selections === null) {
+            set_transient('skwirrel_gavilar_admin_notice', [
+                'type' => 'error',
+                'message' => sprintf(
+                    /* translators: %s: last error message from the API */
+                    __('Could not discover selections via any known RPC method. Last error: %s. Ask the Skwirrel admin for the numeric ID directly.', 'skwirrel-gavilar'),
+                    $lastError
+                ),
+            ], 60);
+        } else {
+            set_transient('skwirrel_gavilar_selections_cache', [
+                'method' => $usedMethod,
+                'selections' => $selections,
+            ], 5 * MINUTE_IN_SECONDS);
+            set_transient('skwirrel_gavilar_admin_notice', [
+                'type' => 'success',
+                'message' => sprintf(
+                    /* translators: 1: number of selections, 2: RPC method that worked */
+                    __('Found %1$d selection(s) via %2$s. See the table below.', 'skwirrel-gavilar'),
+                    count($selections),
+                    $usedMethod
+                ),
+            ], 60);
+        }
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
+    }
+
+    /**
+     * Normalise the various response shapes Skwirrel might return into a list of
+     * `['id' => int, 'name' => string]`. Returns [] if the shape doesn't look right.
+     *
+     * @return array<int, array{id:int,name:string}>
+     */
+    private function extractSelectionList(mixed $result): array
+    {
+        if (!is_array($result)) {
+            return [];
+        }
+        // Try common nested keys first, then fall back to treating the whole result as the list.
+        foreach (['selections', 'dynamic_selections', 'items', 'data'] as $key) {
+            if (isset($result[$key]) && is_array($result[$key])) {
+                return $this->mapSelectionEntries($result[$key]);
+            }
+        }
+        return $this->mapSelectionEntries($result);
+    }
+
+    /**
+     * @param array<mixed> $list
+     * @return array<int, array{id:int,name:string}>
+     */
+    private function mapSelectionEntries(array $list): array
+    {
+        $out = [];
+        foreach ($list as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $id = (int) ($entry['id'] ?? $entry['selection_id'] ?? $entry['dynamic_selection_id'] ?? 0);
+            $name = (string) ($entry['name'] ?? $entry['title'] ?? $entry['label'] ?? '');
+            if ($id > 0) {
+                $out[] = ['id' => $id, 'name' => $name !== '' ? $name : sprintf('Selection %d', $id)];
+            }
+        }
+        return $out;
     }
 
     public function handleResetCursor(): void
