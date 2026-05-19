@@ -32,6 +32,7 @@ final class SettingsPage
         add_action('admin_post_skwirrel_gavilar_sync_now', [$this, 'handleSyncNow']);
         add_action('admin_post_skwirrel_gavilar_detect_locales', [$this, 'handleDetectLocales']);
         add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
+        add_action('admin_post_skwirrel_gavilar_reset_cursor', [$this, 'handleResetCursor']);
     }
 
     public function maybeRenderNotice(): void
@@ -174,11 +175,104 @@ final class SettingsPage
 
             <button type="button" class="button button-secondary" id="skwirrel-gavilar-full-resync"><?php esc_html_e('Full resync', 'skwirrel-gavilar'); ?></button>
 
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-left:1em;">
+                <?php wp_nonce_field(self::NONCE_ACTION); ?>
+                <input type="hidden" name="action" value="skwirrel_gavilar_reset_cursor">
+                <?php submit_button(__('Reset delta cursor', 'skwirrel-gavilar'), 'link-delete', 'submit', false); ?>
+            </form>
+
             <div id="skwirrel-gavilar-resync-status" style="margin-top:1em; display:none; padding:1em; background:#f6f7f7; border-left:4px solid #2271b1;"></div>
 
             <?php $this->renderResyncScript(); ?>
+
+            <hr>
+            <h2><?php esc_html_e('Recent runs', 'skwirrel-gavilar'); ?></h2>
+            <?php $this->renderLogTable(); ?>
         </div>
         <?php
+    }
+
+    private function renderLogTable(): void
+    {
+        global $wpdb;
+        $table = $wpdb->prefix . 'skwirrel_sync_log';
+        $rows = $wpdb->get_results(
+            "SELECT started_at, finished_at, mode, status, products_processed, products_created, products_updated, errors, message
+             FROM {$table} ORDER BY id DESC LIMIT 20",
+            ARRAY_A
+        );
+
+        if (empty($rows)) {
+            echo '<p><em>' . esc_html__('No sync runs recorded yet.', 'skwirrel-gavilar') . '</em></p>';
+            return;
+        }
+        ?>
+        <table class="widefat striped" style="max-width:1100px;">
+            <thead>
+                <tr>
+                    <th><?php esc_html_e('Started (UTC)', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Duration', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Mode', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Status', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Processed', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Created', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Updated', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Errors', 'skwirrel-gavilar'); ?></th>
+                    <th><?php esc_html_e('Message', 'skwirrel-gavilar'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($rows as $row): ?>
+                    <tr>
+                        <td><?php echo esc_html((string) $row['started_at']); ?></td>
+                        <td><?php echo esc_html($this->formatDuration((string) $row['started_at'], (string) ($row['finished_at'] ?? ''))); ?></td>
+                        <td><?php echo esc_html((string) $row['mode']); ?></td>
+                        <td><?php echo $this->statusBadge((string) $row['status']); ?></td>
+                        <td><?php echo (int) $row['products_processed']; ?></td>
+                        <td><?php echo (int) $row['products_created']; ?></td>
+                        <td><?php echo (int) $row['products_updated']; ?></td>
+                        <td><?php echo (int) $row['errors']; ?></td>
+                        <td><?php echo esc_html((string) ($row['message'] ?? '')); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php
+    }
+
+    private function formatDuration(string $startedAt, string $finishedAt): string
+    {
+        if ($startedAt === '' || $finishedAt === '') {
+            return '—';
+        }
+        $start = strtotime($startedAt . ' UTC');
+        $end = strtotime($finishedAt . ' UTC');
+        if (!$start || !$end || $end < $start) {
+            return '—';
+        }
+        $seconds = $end - $start;
+        if ($seconds < 60) {
+            return $seconds . 's';
+        }
+        $minutes = intdiv($seconds, 60);
+        $remainder = $seconds % 60;
+        return sprintf('%dm %ds', $minutes, $remainder);
+    }
+
+    private function statusBadge(string $status): string
+    {
+        $colour = match ($status) {
+            'completed' => '#46b450',
+            'completed_with_errors' => '#dba617',
+            'running' => '#2271b1',
+            'failed' => '#d63638',
+            default => '#999',
+        };
+        return sprintf(
+            '<span style="display:inline-block;padding:2px 8px;border-radius:10px;color:#fff;background:%s;font-size:11px;">%s</span>',
+            esc_attr($colour),
+            esc_html($status)
+        );
     }
 
     private function renderResyncScript(): void
@@ -427,6 +521,23 @@ final class SettingsPage
         set_transient('skwirrel_gavilar_admin_notice', [
             'type' => 'success',
             'message' => __('Locale mapping saved.', 'skwirrel-gavilar'),
+        ], 30);
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
+    }
+
+    public function handleResetCursor(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        delete_option(Settings::OPT_LAST_SYNCED_AT);
+        set_transient('skwirrel_gavilar_admin_notice', [
+            'type' => 'success',
+            'message' => __('Delta cursor cleared. The next sync will pull every product updated in the last 24h; for a complete refresh, use "Full resync".', 'skwirrel-gavilar'),
         ], 30);
 
         wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
