@@ -11,8 +11,10 @@ WordPress is a read-only presentation layer.
   control which products appear on the public site from inside Skwirrel).
 - Stores each product as a `pim_product` custom post type with a hierarchical
   `pim_category` taxonomy.
-- Multilingual via **Polylang Pro**: each Skwirrel translation lands as a
-  separate WP post per language, linked together as a translation group.
+- Multilingual via **Polylang** (Free or Pro): each Skwirrel translation lands
+  as a separate WP post per language, linked together as a translation group.
+  Pro is not required — every `pll_*` function the plugin calls is in the
+  free API.
 - Writes Yoast SEO meta (title / description / focus keyword / OG fields) on
   each locale's post.
 - Downloads attachments into the WP media library inline; dedups by Skwirrel
@@ -28,7 +30,7 @@ WordPress is a read-only presentation layer.
 |---|---|
 | WordPress | 6.4+ |
 | PHP | 8.1+ |
-| Polylang Pro | active, with site languages configured (NL/EN/FR/…) |
+| Polylang (Free or Pro) | active, with site languages configured (NL/EN/FR/…). Pro adds translated URL bases but isn't required. |
 | Yoast SEO | optional but recommended (meta keys hard-coded for Yoast) |
 
 ## Installation
@@ -132,8 +134,9 @@ src/
 
 ## Troubleshooting
 
-**"Polylang Pro is required" notice.** Activate Polylang Pro and add at least
-one site language. The plugin will degrade to single-language sync until then.
+**"Polylang is required" notice.** Activate Polylang (Free or Pro) and add
+at least one site language. The plugin will degrade to single-language sync
+until then.
 
 **Auto-detect locales returns nothing.** Skwirrel may not expose
 `getLanguages`. The button then falls back to inspecting one product's

@@ -101,7 +101,7 @@ final class SettingsPage
             <h1><?php esc_html_e('Skwirrel Sync for Gavilar', 'skwirrel-gavilar'); ?></h1>
 
             <?php if (!$this->polylang->isActive()): ?>
-                <div class="notice notice-error"><p><strong><?php esc_html_e('Polylang Pro is required.', 'skwirrel-gavilar'); ?></strong> <?php esc_html_e('The sync will fall back to a single-language mode (default WP locale) until Polylang Pro is activated and languages are configured.', 'skwirrel-gavilar'); ?></p></div>
+                <div class="notice notice-warning"><p><strong><?php esc_html_e('Polylang is not active.', 'skwirrel-gavilar'); ?></strong> <?php esc_html_e('The sync will fall back to a single-language mode (default WP locale). Activate Polylang (Free or Pro) and configure your site languages to enable multilingual sync.', 'skwirrel-gavilar'); ?></p></div>
             <?php endif; ?>
 
             <form method="post" action="options.php">
