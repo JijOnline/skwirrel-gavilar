@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace JijOnline\SkwirrelGavilar;
 
+use JijOnline\SkwirrelGavilar\Admin\FullResyncController;
 use JijOnline\SkwirrelGavilar\Admin\SettingsPage;
+use JijOnline\SkwirrelGavilar\Cli\SkwirrelCommand;
 use JijOnline\SkwirrelGavilar\Api\Client;
 use JijOnline\SkwirrelGavilar\Api\OAuthTokenStore;
 use JijOnline\SkwirrelGavilar\Cpt\CategoryTaxonomy;
@@ -48,6 +50,11 @@ final class Plugin
         (new ProductPostType())->register();
         (new CategoryTaxonomy())->register();
         (new SettingsPage($this->client, $this->coordinator, $this->polylang))->register();
+        (new FullResyncController($this->coordinator))->register();
+
+        if (defined('WP_CLI') && WP_CLI) {
+            \WP_CLI::add_command('skwirrel', new SkwirrelCommand($this->coordinator));
+        }
 
         add_action(self::DAILY_HOOK, function (): void {
             $this->coordinator->run();

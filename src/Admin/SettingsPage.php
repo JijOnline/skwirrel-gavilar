@@ -6,6 +6,7 @@ namespace JijOnline\SkwirrelGavilar\Admin;
 use JijOnline\SkwirrelGavilar\Api\Client;
 use JijOnline\SkwirrelGavilar\I18n\Polylang;
 use JijOnline\SkwirrelGavilar\Support\Settings;
+use JijOnline\SkwirrelGavilar\Sync\FullResyncState;
 use JijOnline\SkwirrelGavilar\Sync\SyncCoordinator;
 
 final class SettingsPage
@@ -165,12 +166,109 @@ final class SettingsPage
                 <?php submit_button(__('Test connection', 'skwirrel-gavilar'), 'secondary', 'submit', false); ?>
             </form>
 
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block;">
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
                 <input type="hidden" name="action" value="skwirrel_gavilar_sync_now">
                 <?php submit_button(__('Sync now (delta)', 'skwirrel-gavilar'), 'primary', 'submit', false); ?>
             </form>
+
+            <button type="button" class="button button-secondary" id="skwirrel-gavilar-full-resync"><?php esc_html_e('Full resync', 'skwirrel-gavilar'); ?></button>
+
+            <div id="skwirrel-gavilar-resync-status" style="margin-top:1em; display:none; padding:1em; background:#f6f7f7; border-left:4px solid #2271b1;"></div>
+
+            <?php $this->renderResyncScript(); ?>
         </div>
+        <?php
+    }
+
+    private function renderResyncScript(): void
+    {
+        $ajaxUrl = admin_url('admin-ajax.php');
+        $nonce = wp_create_nonce(\JijOnline\SkwirrelGavilar\Admin\FullResyncController::NONCE_ACTION);
+        $state = FullResyncState::load()->toArray();
+        $confirm = __('A full resync re-fetches every product. Trashed posts will be cleaned up at the end. Continue?', 'skwirrel-gavilar');
+        $running = __('Running… page %page%, processed %processed% (created %created%, updated %updated%, errors %errors%)', 'skwirrel-gavilar');
+        $done = __('Completed. Processed %processed% (created %created%, updated %updated%, errors %errors%). %message%', 'skwirrel-gavilar');
+        $failed = __('Failed: %message%', 'skwirrel-gavilar');
+        ?>
+        <script>
+        (function () {
+            const ajaxUrl = <?php echo wp_json_encode($ajaxUrl); ?>;
+            const nonce = <?php echo wp_json_encode($nonce); ?>;
+            const initialState = <?php echo wp_json_encode($state); ?>;
+            const i18n = {
+                confirm: <?php echo wp_json_encode($confirm); ?>,
+                running: <?php echo wp_json_encode($running); ?>,
+                done: <?php echo wp_json_encode($done); ?>,
+                failed: <?php echo wp_json_encode($failed); ?>,
+            };
+
+            const $button = document.getElementById('skwirrel-gavilar-full-resync');
+            const $status = document.getElementById('skwirrel-gavilar-resync-status');
+
+            function render(state) {
+                if (!state || state.status === 'idle') {
+                    $status.style.display = 'none';
+                    $button.disabled = false;
+                    return;
+                }
+                let template = i18n.running;
+                if (state.status === 'completed') template = i18n.done;
+                if (state.status === 'failed') template = i18n.failed;
+                const msg = template
+                    .replace('%page%', state.page)
+                    .replace('%processed%', state.processed)
+                    .replace('%created%', state.created)
+                    .replace('%updated%', state.updated)
+                    .replace('%errors%', state.errors)
+                    .replace('%message%', state.message || '');
+                $status.textContent = msg;
+                $status.style.display = 'block';
+                $button.disabled = state.status === 'running';
+            }
+
+            async function post(action) {
+                const body = new URLSearchParams({ action, nonce });
+                const res = await fetch(ajaxUrl, { method: 'POST', body, credentials: 'same-origin' });
+                const json = await res.json();
+                if (!json.success) {
+                    throw new Error((json.data && json.data.message) || 'request failed');
+                }
+                return json.data.state;
+            }
+
+            async function stepLoop() {
+                try {
+                    let state = await post('skwirrel_gavilar_full_resync_step');
+                    render(state);
+                    if (state.status === 'running') {
+                        setTimeout(stepLoop, 250);
+                    }
+                } catch (e) {
+                    render({ status: 'failed', message: e.message });
+                }
+            }
+
+            $button.addEventListener('click', async function () {
+                if (!confirm(i18n.confirm)) return;
+                try {
+                    const state = await post('skwirrel_gavilar_full_resync_start');
+                    render(state);
+                    setTimeout(stepLoop, 100);
+                } catch (e) {
+                    render({ status: 'failed', message: e.message });
+                }
+            });
+
+            // Resume display if a run was already in flight when the page loaded.
+            if (initialState && initialState.status === 'running') {
+                render(initialState);
+                setTimeout(stepLoop, 100);
+            } else if (initialState && initialState.status !== 'idle') {
+                render(initialState);
+            }
+        })();
+        </script>
         <?php
     }
 

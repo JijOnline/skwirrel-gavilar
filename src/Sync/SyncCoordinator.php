@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace JijOnline\SkwirrelGavilar\Sync;
 
 use JijOnline\SkwirrelGavilar\Api\Client;
+use JijOnline\SkwirrelGavilar\Cpt\ProductPostType;
 use JijOnline\SkwirrelGavilar\Mapping\ProductMapper;
 use JijOnline\SkwirrelGavilar\Support\Logger;
 use JijOnline\SkwirrelGavilar\Support\Settings;
@@ -45,9 +46,20 @@ final class SyncCoordinator
     }
 
     /**
-     * Full resync, one page at a time. Caller drives the page cursor; returns next page or null when done.
+     * Run a full resync end-to-end in a single PHP process (suitable for WP-CLI).
      *
-     * @return array{run_id:string, processed:int, created:int, updated:int, errors:int, next_page:?int}
+     * @return array{run_id:string, processed:int, created:int, updated:int, errors:int}
+     */
+    public function runFull(): array
+    {
+        if (!$this->settings->isConfigured()) {
+            throw new \RuntimeException('Plugin is not configured.');
+        }
+        return $this->runWithSince(null, self::MODE_FULL, /* finalize: */ true);
+    }
+
+    /**
+     * Process one page of a multi-step full resync. Returns the updated state.
      */
     public function runFullPage(string $runId, int $page): array
     {
@@ -59,9 +71,47 @@ final class SyncCoordinator
     }
 
     /**
-     * @return array{run_id:string, processed:int, created:int, updated:int, errors:int}
+     * Soft-delete (trash) any pim_product whose _skwirrel_last_run_id is not the given runId.
+     * Only safe to call at the end of a *full* run — delta runs only update changed products.
+     *
+     * @return int Number of trashed posts.
      */
-    private function runWithSince(string $since, string $mode): array
+    public function finalizeFullRun(string $runId): int
+    {
+        $query = new \WP_Query([
+            'post_type' => ProductPostType::SLUG,
+            'post_status' => ['publish', 'draft', 'pending', 'future', 'private'],
+            'posts_per_page' => -1,
+            'fields' => 'ids',
+            'no_found_rows' => true,
+            'lang' => '',
+            'meta_query' => [
+                'relation' => 'OR',
+                [
+                    'key' => ProductMapper::META_LAST_RUN_ID,
+                    'value' => $runId,
+                    'compare' => '!=',
+                ],
+                [
+                    'key' => ProductMapper::META_LAST_RUN_ID,
+                    'compare' => 'NOT EXISTS',
+                ],
+            ],
+        ]);
+
+        $trashed = 0;
+        foreach ($query->posts as $id) {
+            if (wp_trash_post((int) $id)) {
+                $trashed++;
+            }
+        }
+        return $trashed;
+    }
+
+    /**
+     * @return array{run_id:string, processed:int, created:int, updated:int, errors:int, trashed?:int}
+     */
+    private function runWithSince(?string $since, string $mode, bool $finalize = false): array
     {
         $runId = wp_generate_uuid4();
         $this->logger->startRun($runId, $mode);
@@ -77,6 +127,10 @@ final class SyncCoordinator
             $totals['errors'] += $result['errors'];
             $page = $result['next_page'] ?? 0;
         } while ($page > 0);
+
+        if ($finalize && $mode === self::MODE_FULL && $totals['errors'] === 0) {
+            $totals['trashed'] = $this->finalizeFullRun($runId);
+        }
 
         $this->logger->finishRun($runId, $totals['errors'] > 0 ? 'completed_with_errors' : 'completed', $totals);
 
