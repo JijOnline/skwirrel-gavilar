@@ -50,7 +50,11 @@ final class OAuthTokenStore
         ]);
 
         if (is_wp_error($response)) {
-            throw new TransportException('Token request failed: ' . $response->get_error_message());
+            throw new TransportException(sprintf(
+                'Token request to %s failed: %s',
+                $tokenUrl,
+                $response->get_error_message()
+            ));
         }
 
         $code = wp_remote_retrieve_response_code($response);
@@ -59,7 +63,8 @@ final class OAuthTokenStore
 
         if ($code !== 200 || !is_array($data) || empty($data['access_token'])) {
             throw new AuthException(sprintf(
-                'Token endpoint returned %d: %s',
+                'Token endpoint %s returned %d: %s',
+                $tokenUrl,
                 $code,
                 is_string($body) ? substr($body, 0, 300) : ''
             ));
