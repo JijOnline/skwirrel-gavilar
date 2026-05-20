@@ -41,6 +41,9 @@ final class OAuthTokenStore
 
         $response = wp_remote_post($tokenUrl, [
             'timeout' => 20,
+            // An OAuth2 token endpoint never legitimately redirects. Don't follow
+            // 3xx silently — a POST->GET downgrade would land on a 404. Surface it.
+            'redirection' => 0,
             'headers' => [
                 'Accept' => 'application/json',
                 'Authorization' => 'Basic ' . base64_encode($clientId . ':' . $clientSecret),
@@ -62,12 +65,7 @@ final class OAuthTokenStore
         $data = json_decode($body, true);
 
         if ($code !== 200 || !is_array($data) || empty($data['access_token'])) {
-            throw new AuthException(sprintf(
-                'Token endpoint %s returned %d: %s',
-                $tokenUrl,
-                $code,
-                is_string($body) ? substr($body, 0, 300) : ''
-            ));
+            throw new AuthException(self::describeFailure($tokenUrl, (int) $code, (string) $body, $response));
         }
 
         $token = (string) $data['access_token'];
@@ -75,5 +73,33 @@ final class OAuthTokenStore
         $ttl = max(60, $expiresIn - self::SAFETY_BUFFER_SECONDS);
         set_transient(self::TRANSIENT, $token, $ttl);
         return $token;
+    }
+
+    /**
+     * Build a self-diagnosing failure message: exact URL byte length, a hex
+     * dump if the URL carries non-ASCII, the redirect target on a 3xx, and a
+     * body excerpt. Lets us tell a typo / hidden character / redirect apart
+     * without server log access.
+     *
+     * @param array|\WP_Error $response
+     */
+    private static function describeFailure(string $url, int $code, string $body, $response): string
+    {
+        $parts = [sprintf('Token endpoint %s returned %d.', $url, $code)];
+
+        $len = strlen($url);
+        $hasNonAscii = (bool) preg_match('/[^\x21-\x7E]/', $url);
+        $parts[] = sprintf('[url: %d bytes%s]', $len, $hasNonAscii ? ', NON-ASCII present hex=' . bin2hex($url) : '');
+
+        if ($code >= 300 && $code < 400) {
+            $location = wp_remote_retrieve_header($response, 'location');
+            $parts[] = 'Redirect Location: ' . ($location !== '' ? $location : '(none)');
+        }
+
+        if ($body !== '') {
+            $parts[] = 'Body: ' . substr($body, 0, 200);
+        }
+
+        return implode(' ', $parts);
     }
 }
