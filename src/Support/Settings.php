@@ -25,19 +25,23 @@ final class Settings
     }
 
     /**
-     * Defensive URL cleanup. esc_url_raw (the field sanitizer) converts a
-     * stray trailing space into a literal "%20" instead of stripping it,
-     * which silently breaks the endpoint path. Strip whitespace and any
-     * trailing encoded-space artefacts here so an already-saved bad value
-     * still resolves correctly.
+     * Defensive URL cleanup.
+     *
+     * Two failure modes this guards against, both from copy-pasting a URL:
+     *  1. Invisible Unicode (zero-width space, BOM, non-breaking space) that
+     *     survives esc_url_raw — its regex permits every \x80-\xff byte, so
+     *     multi-byte UTF-8 passes through — and that PHP's trim() won't touch.
+     *     A URL is pure ASCII by definition, so anything outside printable
+     *     ASCII (0x21-0x7E) is illegitimate and stripped.
+     *  2. A trailing space turned into a literal "%20" by esc_url_raw.
      */
     public static function cleanUrl(string $raw): string
     {
-        $url = trim($raw);
+        $url = preg_replace('/[^\x21-\x7E]/', '', $raw) ?? '';
         while (str_ends_with($url, '%20') || str_ends_with($url, '%09')) {
             $url = substr($url, 0, -3);
         }
-        return trim($url);
+        return $url;
     }
 
     public function clientId(): string
