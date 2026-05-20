@@ -64,8 +64,8 @@ final class SettingsPage
 
     public function registerSettings(): void
     {
-        register_setting(self::OPTION_GROUP, Settings::OPT_TOKEN_URL, ['type' => 'string', 'sanitize_callback' => 'esc_url_raw']);
-        register_setting(self::OPTION_GROUP, Settings::OPT_API_URL, ['type' => 'string', 'sanitize_callback' => 'esc_url_raw']);
+        register_setting(self::OPTION_GROUP, Settings::OPT_TOKEN_URL, ['type' => 'string', 'sanitize_callback' => [self::class, 'sanitizeUrl']]);
+        register_setting(self::OPTION_GROUP, Settings::OPT_API_URL, ['type' => 'string', 'sanitize_callback' => [self::class, 'sanitizeUrl']]);
         register_setting(self::OPTION_GROUP, Settings::OPT_CLIENT_ID, ['type' => 'string', 'sanitize_callback' => 'sanitize_text_field']);
         register_setting(self::OPTION_GROUP, Settings::OPT_DYNAMIC_SELECTION_ID, ['type' => 'integer', 'sanitize_callback' => 'absint']);
 
@@ -73,6 +73,12 @@ final class SettingsPage
             'type' => 'string',
             'sanitize_callback' => [self::class, 'sanitizeClientSecret'],
         ]);
+    }
+
+    public static function sanitizeUrl(mixed $value): string
+    {
+        // Trim *before* esc_url_raw so a stray trailing space isn't turned into "%20".
+        return esc_url_raw(Settings::cleanUrl((string) $value));
     }
 
     public static function sanitizeClientSecret(mixed $value): string

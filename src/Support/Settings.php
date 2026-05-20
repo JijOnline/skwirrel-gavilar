@@ -16,12 +16,28 @@ final class Settings
 
     public function tokenUrl(): string
     {
-        return (string) get_option(self::OPT_TOKEN_URL, '');
+        return self::cleanUrl((string) get_option(self::OPT_TOKEN_URL, ''));
     }
 
     public function apiUrl(): string
     {
-        return (string) get_option(self::OPT_API_URL, '');
+        return self::cleanUrl((string) get_option(self::OPT_API_URL, ''));
+    }
+
+    /**
+     * Defensive URL cleanup. esc_url_raw (the field sanitizer) converts a
+     * stray trailing space into a literal "%20" instead of stripping it,
+     * which silently breaks the endpoint path. Strip whitespace and any
+     * trailing encoded-space artefacts here so an already-saved bad value
+     * still resolves correctly.
+     */
+    public static function cleanUrl(string $raw): string
+    {
+        $url = trim($raw);
+        while (str_ends_with($url, '%20') || str_ends_with($url, '%09')) {
+            $url = substr($url, 0, -3);
+        }
+        return trim($url);
     }
 
     public function clientId(): string
