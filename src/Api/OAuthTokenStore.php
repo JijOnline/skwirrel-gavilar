@@ -45,7 +45,11 @@ final class OAuthTokenStore
             // 3xx silently — a POST->GET downgrade would land on a 404. Surface it.
             'redirection' => 0,
             'headers' => [
-                'Accept' => 'application/json',
+                // IMPORTANT: must NOT be "application/json". Skwirrel content-negotiates:
+                // an Accept: application/json request is routed to the JSON-RPC dispatcher,
+                // which doesn't know /oauth2/token and answers -32003 "URL not found".
+                // "*/*" makes the server route to the real OAuth handler.
+                'Accept' => '*/*',
                 'Authorization' => 'Basic ' . base64_encode($clientId . ':' . $clientSecret),
                 'Content-Type' => 'application/x-www-form-urlencoded',
             ],
