@@ -296,8 +296,11 @@ final class ProductMapper
     {
         $source = (string) ($translation['seo_url'] ?? $translation['slug'] ?? '');
         if ($source === '') {
-            // No translated slug — a product code is stable and unique; fall back to the title.
-            $source = (string) ($product['manufacturer_product_code'] ?? $product['internal_product_code'] ?? $title);
+            // Name-based slug for SEO, with the Skwirrel product id appended so
+            // products with an identical (ERP) name still get a unique URL.
+            $productId = (int) ($product['product_id'] ?? 0);
+            $base = sanitize_title($title);
+            $source = $base !== '' ? $base . '-' . $productId : (string) $productId;
         }
         $slug = sanitize_title($source);
         // Avoid cross-language slug collisions when Polylang shared slugs is off.

@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 namespace JijOnline\SkwirrelGavilar\I18n;
 
+use JijOnline\SkwirrelGavilar\Cpt\CategoryTaxonomy;
+use JijOnline\SkwirrelGavilar\Cpt\ProductPostType;
 use JijOnline\SkwirrelGavilar\Support\Settings;
 
 /**
- * Thin wrapper around Polylang Pro's PHP API.
+ * Thin wrapper around Polylang's PHP API (Free or Pro).
  *
  * If Polylang is not active, isActive() returns false and the rest of the
  * methods degrade gracefully (single "default" language equal to the WP locale).
@@ -14,6 +16,26 @@ use JijOnline\SkwirrelGavilar\Support\Settings;
 final class Polylang
 {
     public function __construct(private readonly Settings $settings) {}
+
+    /**
+     * Tell Polylang to manage our CPT + taxonomy. Without this, Polylang
+     * ignores them entirely — its admin language filter won't apply and
+     * pll_set_post_language has nothing to hang the language on.
+     */
+    public function register(): void
+    {
+        add_filter('pll_get_post_types', static function ($types, $is_settings) {
+            $types = is_array($types) ? $types : [];
+            $types[ProductPostType::SLUG] = ProductPostType::SLUG;
+            return $types;
+        }, 10, 2);
+
+        add_filter('pll_get_taxonomies', static function ($taxonomies, $is_settings) {
+            $taxonomies = is_array($taxonomies) ? $taxonomies : [];
+            $taxonomies[CategoryTaxonomy::SLUG] = CategoryTaxonomy::SLUG;
+            return $taxonomies;
+        }, 10, 2);
+    }
 
     public function isActive(): bool
     {

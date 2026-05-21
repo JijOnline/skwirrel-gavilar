@@ -10,6 +10,7 @@ use JijOnline\SkwirrelGavilar\Api\Client;
 use JijOnline\SkwirrelGavilar\Api\OAuthTokenStore;
 use JijOnline\SkwirrelGavilar\Cpt\CategoryTaxonomy;
 use JijOnline\SkwirrelGavilar\Cpt\ProductPostType;
+use JijOnline\SkwirrelGavilar\Display\ProductDisplay;
 use JijOnline\SkwirrelGavilar\I18n\Polylang;
 use JijOnline\SkwirrelGavilar\Mapping\AttachmentMapper;
 use JijOnline\SkwirrelGavilar\Mapping\CategoryMapper;
@@ -49,6 +50,8 @@ final class Plugin
 
         (new ProductPostType())->register();
         (new CategoryTaxonomy())->register();
+        $this->polylang->register();
+        (new ProductDisplay())->register();
         (new SettingsPage($this->client, $this->coordinator, $this->polylang))->register();
         (new FullResyncController($this->coordinator))->register();
 
