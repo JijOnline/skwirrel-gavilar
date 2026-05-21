@@ -32,17 +32,18 @@ final class AttachmentMapper
             if (!is_array($attachment)) {
                 continue;
             }
-            $skwirrelId = (int) ($attachment['attachment_id'] ?? $attachment['id'] ?? 0);
-            $url = (string) ($attachment['url'] ?? $attachment['download_url'] ?? '');
-            $mime = (string) ($attachment['mime_type'] ?? '');
-            $label = (string) ($attachment['name'] ?? $attachment['label'] ?? '');
+            $skwirrelId = (int) ($attachment['product_attachment_id'] ?? $attachment['attachment_id'] ?? $attachment['id'] ?? 0);
+            $url = (string) ($attachment['source_url'] ?? $attachment['url'] ?? $attachment['download_url'] ?? '');
+            $mime = (string) ($attachment['file_mimetype'] ?? $attachment['mime_type'] ?? '');
+            $fileName = (string) ($attachment['file_name'] ?? $attachment['name'] ?? '');
+            $label = (string) ($attachment['file_name'] ?? $attachment['label'] ?? $attachment['name'] ?? '');
             $role = $this->resolveRole($attachment, $mime);
 
             if ($skwirrelId <= 0 || $url === '') {
                 continue;
             }
 
-            $attachmentId = $this->upsertOne($productPostId, $skwirrelId, $url, $label, $mime);
+            $attachmentId = $this->upsertOne($productPostId, $skwirrelId, $url, $fileName, $label, $mime);
             if ($attachmentId === null) {
                 continue;
             }
@@ -73,7 +74,7 @@ final class AttachmentMapper
         return ['featured' => $featuredId, 'gallery' => $galleryIds, 'documents' => $documents];
     }
 
-    private function upsertOne(int $productPostId, int $skwirrelId, string $url, string $label, string $mime): ?int
+    private function upsertOne(int $productPostId, int $skwirrelId, string $url, string $fileName, string $label, string $mime): ?int
     {
         $existing = $this->findBySkwirrelId($skwirrelId);
         if ($existing !== null) {
@@ -99,7 +100,7 @@ final class AttachmentMapper
             return null;
         }
 
-        $filename = $this->filenameFromUrl($url, $mime);
+        $filename = $this->resolveFilename($fileName, $url, $mime);
         $fileArray = ['name' => $filename, 'tmp_name' => $tmp];
 
         $attachmentId = media_handle_sideload($fileArray, $productPostId, $label !== '' ? $label : null);
@@ -135,8 +136,9 @@ final class AttachmentMapper
 
     private function resolveRole(array $attachment, string $mime): string
     {
-        $type = strtolower((string) ($attachment['type'] ?? $attachment['role'] ?? ''));
-        if ($type === 'featured' || $type === 'main' || $type === 'primary') {
+        $type = strtolower((string) ($attachment['product_attachment_type_code'] ?? $attachment['type'] ?? $attachment['role'] ?? ''));
+        // Known Skwirrel image type codes (PPI = product picture).
+        if (in_array($type, ['featured', 'main', 'primary'], true)) {
             return self::ROLE_FEATURED;
         }
         if (str_starts_with($mime, 'image/')) {
@@ -150,10 +152,14 @@ final class AttachmentMapper
         return str_starts_with($mime, 'image/');
     }
 
-    private function filenameFromUrl(string $url, string $mime): string
+    /** Prefer Skwirrel's own file_name; fall back to the URL basename, then a hash. */
+    private function resolveFilename(string $fileName, string $url, string $mime): string
     {
-        $path = parse_url($url, PHP_URL_PATH);
-        $name = is_string($path) ? basename($path) : '';
+        $name = $fileName;
+        if ($name === '' || !str_contains($name, '.')) {
+            $path = parse_url($url, PHP_URL_PATH);
+            $name = is_string($path) ? basename($path) : '';
+        }
         if ($name === '' || !str_contains($name, '.')) {
             $ext = $this->extensionForMime($mime);
             $name = 'skwirrel-' . substr(md5($url), 0, 10) . ($ext !== '' ? '.' . $ext : '');

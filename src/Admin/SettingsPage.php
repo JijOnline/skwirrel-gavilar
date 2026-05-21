@@ -557,8 +557,11 @@ final class SettingsPage
         }
         check_admin_referer(self::NONCE_ACTION);
 
+        $flags = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+        $dump = [];
+
         try {
-            $result = $this->client->call('getProducts', [
+            $product = $this->client->call('getProducts', [
                 'page' => 1,
                 'limit' => 1,
                 'include_product_status' => true,
@@ -567,15 +570,23 @@ final class SettingsPage
                 'include_product_seo' => true,
                 'include_attachments' => true,
             ]);
-            $json = (string) wp_json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            set_transient('skwirrel_gavilar_sample_product', $json, 15 * MINUTE_IN_SECONDS);
-            set_transient('skwirrel_gavilar_admin_notice', [
-                'type' => 'success',
-                'message' => __('Sample product opgehaald — zie de raw JSON onderaan.', 'skwirrel-gavilar'),
-            ], 30);
+            $dump['getProducts (1)'] = (string) wp_json_encode($product, $flags);
         } catch (\Throwable $e) {
-            set_transient('skwirrel_gavilar_admin_notice', ['type' => 'error', 'message' => $e->getMessage()], 30);
+            $dump['getProducts (1)'] = 'ERROR: ' . $e->getMessage();
         }
+
+        try {
+            $categories = $this->client->call('getCategories', ['page' => 1, 'limit' => 5]);
+            $dump['getCategories (5)'] = (string) wp_json_encode($categories, $flags);
+        } catch (\Throwable $e) {
+            $dump['getCategories (5)'] = 'ERROR: ' . $e->getMessage();
+        }
+
+        set_transient('skwirrel_gavilar_sample_product', $dump, 15 * MINUTE_IN_SECONDS);
+        set_transient('skwirrel_gavilar_admin_notice', [
+            'type' => 'success',
+            'message' => __('Sample opgehaald — zie de raw JSON onderaan.', 'skwirrel-gavilar'),
+        ], 30);
 
         wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
         exit;
@@ -583,16 +594,19 @@ final class SettingsPage
 
     private function renderSampleProduct(): void
     {
-        $json = get_transient('skwirrel_gavilar_sample_product');
-        if (!is_string($json) || $json === '') {
+        $dump = get_transient('skwirrel_gavilar_sample_product');
+        if (!is_array($dump) || empty($dump)) {
             return;
         }
-        ?>
-        <div style="margin-top:1em; max-width:1100px;">
-            <p><strong><?php esc_html_e('Sample product (raw JSON)', 'skwirrel-gavilar'); ?></strong></p>
-            <textarea readonly rows="20" style="width:100%; font-family:monospace; font-size:11px;"><?php echo esc_textarea($json); ?></textarea>
-        </div>
-        <?php
+        echo '<div style="margin-top:1em; max-width:1100px;">';
+        foreach ($dump as $label => $json) {
+            printf('<p><strong>%s</strong></p>', esc_html((string) $label));
+            printf(
+                '<textarea readonly rows="14" style="width:100%%; font-family:monospace; font-size:11px;">%s</textarea>',
+                esc_textarea((string) $json)
+            );
+        }
+        echo '</div>';
     }
 
     public function handleResetCursor(): void

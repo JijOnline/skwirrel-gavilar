@@ -15,6 +15,20 @@ final class ProductMapper
     public const META_UPDATED_ON = '_skwirrel_updated_on';
     public const META_LAST_RUN_ID = '_skwirrel_last_run_id';
 
+    /** Flat product meta -> Skwirrel field name. */
+    private const PRODUCT_META_MAP = [
+        '_pim_manufacturer' => 'manufacturer_name',
+        '_pim_brand' => 'brand_name',
+        '_pim_gtin' => 'product_gtin',
+        '_pim_weight' => 'product_weight',
+        '_pim_weight_uom' => 'product_weight_uom',
+        '_pim_cbs_number' => 'cbs_number',
+        '_pim_internal_code' => 'internal_product_code',
+        '_pim_manufacturer_code' => 'manufacturer_product_code',
+        '_pim_product_url' => 'product_url',
+        '_pim_erp_description' => 'product_erp_description',
+    ];
+
     public function __construct(
         private readonly CategoryMapper $categoryMapper,
         private readonly FeatureMapper $featureMapper,
@@ -25,9 +39,10 @@ final class ProductMapper
 
     /**
      * Upsert one Skwirrel product as N posts (one per Polylang language), linked as translations.
+     * Gavilar currently has no per-locale data, so in practice this is one post per product.
      *
      * @param array<string, mixed> $product
-     * @param array<int, array<string, mixed>> $categoriesById
+     * @param array<int, array<string, mixed>> $categoriesById getCategories index, keyed by category id.
      * @return array{created:int, updated:int}
      */
     public function upsert(array $product, string $runId, array $categoriesById = []): array
@@ -40,8 +55,8 @@ final class ProductMapper
         $translationsByLang = $this->resolveTranslationsByLang($product);
         $existingByLang = $this->findExistingPostsBySkwirrelId($skwirrelId);
 
-        // Sync attachments once (media is language-agnostic in WP).
-        $attachments = (array) ($product['attachments'] ?? []);
+        // Media is language-agnostic in WP — sync attachments once, reuse on every locale post.
+        $attachments = (array) ($product['_attachments'] ?? []);
         $sharedAttachmentTargets = null;
 
         $postIdsByLang = [];
@@ -50,7 +65,7 @@ final class ProductMapper
         foreach ($this->polylang->languages() as $slug) {
             $translation = $translationsByLang[$slug]
                 ?? $translationsByLang[$this->polylang->defaultLanguage()]
-                ?? $product;
+                ?? [];
 
             $existingId = $existingByLang[$slug] ?? null;
             $isCreate = ($existingId === null);
@@ -69,7 +84,6 @@ final class ProductMapper
             }
 
             $this->applyCategoriesForLang($postId, $slug, $product, $categoriesById);
-            $this->featureMapper->apply($postId, (array) ($product['custom_classes'] ?? []));
             $this->writeSeoMeta($postId, $translation);
 
             if ($sharedAttachmentTargets === null && !empty($attachments)) {
@@ -97,10 +111,10 @@ final class ProductMapper
      */
     private function writePost(int $skwirrelId, string $langSlug, array $product, array $translation, string $runId, ?int $existingId): int
     {
-        $title = (string) ($translation['name'] ?? $product['name'] ?? sprintf('Product %d', $skwirrelId));
-        $description = (string) ($translation['description'] ?? '');
+        $title = $this->resolveTitle($product, $translation);
+        $description = (string) ($translation['description'] ?? $translation['long_description'] ?? '');
         $excerpt = (string) ($translation['short_description'] ?? '');
-        $slug = $this->buildSlug($translation, $title, $langSlug);
+        $slug = $this->buildSlug($product, $translation, $title, $langSlug);
 
         $postData = [
             'post_type' => ProductPostType::SLUG,
@@ -127,12 +141,49 @@ final class ProductMapper
         if (!empty($product['external_product_id'])) {
             update_post_meta($postId, self::META_EXTERNAL_ID, (string) $product['external_product_id']);
         }
-        if (!empty($product['updated_on'])) {
-            update_post_meta($postId, self::META_UPDATED_ON, (string) $product['updated_on']);
+        $updatedOn = (string) ($product['product_updated_on'] ?? $product['updated_on'] ?? '');
+        if ($updatedOn !== '') {
+            update_post_meta($postId, self::META_UPDATED_ON, $updatedOn);
         }
         update_post_meta($postId, self::META_LAST_RUN_ID, $runId);
+        $this->writeProductMeta($postId, $product);
 
         return $postId;
+    }
+
+    /**
+     * Skwirrel has no single "name" field. Prefer a translated name when present,
+     * otherwise fall back to the ERP description, then a product code.
+     *
+     * @param array<string, mixed> $product
+     * @param array<string, mixed> $translation
+     */
+    private function resolveTitle(array $product, array $translation): string
+    {
+        foreach (['name', 'product_name', 'title'] as $key) {
+            if (!empty($translation[$key])) {
+                return (string) $translation[$key];
+            }
+        }
+        foreach (['product_erp_description', 'manufacturer_product_code', 'internal_product_code', 'external_product_id'] as $key) {
+            if (!empty($product[$key])) {
+                return (string) $product[$key];
+            }
+        }
+        return sprintf('Product %d', (int) ($product['product_id'] ?? 0));
+    }
+
+    /** @param array<string, mixed> $product */
+    private function writeProductMeta(int $postId, array $product): void
+    {
+        foreach (self::PRODUCT_META_MAP as $metaKey => $srcKey) {
+            $value = $product[$srcKey] ?? null;
+            if ($value === null || $value === '' || (is_array($value) && $value === [])) {
+                delete_post_meta($postId, $metaKey);
+                continue;
+            }
+            update_post_meta($postId, $metaKey, is_scalar($value) ? $value : wp_json_encode($value));
+        }
     }
 
     /**
@@ -144,27 +195,24 @@ final class ProductMapper
     private function resolveTranslationsByLang(array $product): array
     {
         $byLang = [];
-        $translations = $product['translations'] ?? [];
+        $translations = $product['_product_translations'] ?? $product['translations'] ?? [];
 
-        if (!is_array($translations) || empty($translations)) {
-            $byLang[$this->polylang->defaultLanguage()] = $product;
-            return $byLang;
+        if (is_array($translations)) {
+            foreach ($translations as $localeKey => $translation) {
+                if (!is_array($translation)) {
+                    continue;
+                }
+                $localeCode = (string) ($translation['language'] ?? $translation['locale'] ?? $translation['context'] ?? $localeKey);
+                $slug = $this->polylang->resolveSlug($localeCode);
+                if ($slug !== null) {
+                    $byLang[$slug] = $translation;
+                }
+            }
         }
 
-        foreach ($translations as $localeKey => $translation) {
-            if (!is_array($translation)) {
-                continue;
-            }
-            $localeCode = (string) ($translation['locale'] ?? $translation['context'] ?? $localeKey);
-            $slug = $this->polylang->resolveSlug($localeCode);
-            if ($slug === null) {
-                continue;
-            }
-            $byLang[$slug] = $translation;
-        }
-
+        // No usable translations (Gavilar's current state) — one post in the default language.
         if (empty($byLang)) {
-            $byLang[$this->polylang->defaultLanguage()] = $product;
+            $byLang[$this->polylang->defaultLanguage()] = [];
         }
 
         return $byLang;
@@ -199,23 +247,32 @@ final class ProductMapper
     }
 
     /**
+     * The product's _categories array only references categories by id; names and
+     * hierarchy come from the getCategories index.
+     *
      * @param array<string, mixed> $product
      * @param array<int, array<string, mixed>> $categoriesById
      */
     private function applyCategoriesForLang(int $postId, string $langSlug, array $product, array $categoriesById): void
     {
-        $categories = (array) ($product['categories'] ?? []);
+        $categoryRefs = (array) ($product['_categories'] ?? $product['categories'] ?? []);
         $termIds = [];
-        foreach ($categories as $category) {
-            if (!is_array($category)) {
+
+        foreach ($categoryRefs as $ref) {
+            if (!is_array($ref)) {
                 continue;
             }
-            $idsByLang = $this->categoryMapper->upsert($category, $categoriesById);
+            $catId = (int) ($ref['product_category_id'] ?? $ref['category_id'] ?? $ref['id'] ?? 0);
+            if ($catId <= 0 || !isset($categoriesById[$catId])) {
+                continue;
+            }
+            $idsByLang = $this->categoryMapper->upsert($categoriesById[$catId], $categoriesById);
             $termId = $idsByLang[$langSlug] ?? $idsByLang[$this->polylang->defaultLanguage()] ?? 0;
             if ($termId > 0) {
                 $termIds[] = $termId;
             }
         }
+
         wp_set_object_terms($postId, array_values(array_unique($termIds)), CategoryTaxonomy::SLUG);
     }
 
@@ -231,14 +288,21 @@ final class ProductMapper
         update_post_meta($postId, '_pim_documents', $shared['documents']);
     }
 
-    /** @param array<string, mixed> $translation */
-    private function buildSlug(array $translation, string $title, string $langSlug): string
+    /**
+     * @param array<string, mixed> $product
+     * @param array<string, mixed> $translation
+     */
+    private function buildSlug(array $product, array $translation, string $title, string $langSlug): string
     {
-        $source = (string) ($translation['seo_url'] ?? $translation['slug'] ?? $title);
+        $source = (string) ($translation['seo_url'] ?? $translation['slug'] ?? '');
+        if ($source === '') {
+            // No translated slug — a product code is stable and unique; fall back to the title.
+            $source = (string) ($product['manufacturer_product_code'] ?? $product['internal_product_code'] ?? $title);
+        }
         $slug = sanitize_title($source);
         // Avoid cross-language slug collisions when Polylang shared slugs is off.
         if ($langSlug !== $this->polylang->defaultLanguage()) {
-            $slug = $slug . '-' . $langSlug;
+            $slug .= '-' . $langSlug;
         }
         return $slug;
     }

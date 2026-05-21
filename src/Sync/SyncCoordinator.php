@@ -16,6 +16,9 @@ final class SyncCoordinator
 
     private const PAGE_SIZE = 500;
 
+    /** @var array<int, array<string, mixed>>|null Memoised getCategories index for the current run. */
+    private ?array $categoryIndex = null;
+
     public function __construct(
         private readonly Client $client,
         private readonly ProductMapper $productMapper,
@@ -166,15 +169,18 @@ final class SyncCoordinator
         }
 
         $result = $this->client->call('getProducts', $params);
-        $rawProducts = is_array($result) ? ($result['products'] ?? $result) : [];
-        if (!is_array($rawProducts)) {
-            $rawProducts = [];
-        }
-        // Pagination must be decided on the unfiltered page size.
-        $hasMore = count($rawProducts) === self::PAGE_SIZE;
+        $rawProducts = (is_array($result) && isset($result['products']) && is_array($result['products']))
+            ? $result['products']
+            : [];
+
+        // Pagination from the response's page object (number_of_pages / current_page).
+        $pageInfo = (is_array($result) && isset($result['page']) && is_array($result['page'])) ? $result['page'] : [];
+        $currentPage = (int) ($pageInfo['current_page'] ?? $page);
+        $totalPages = (int) ($pageInfo['number_of_pages'] ?? $currentPage);
+        $hasMore = $currentPage < $totalPages;
 
         $products = $this->filterByStatus($rawProducts);
-        $categoriesById = $this->indexCategories($result);
+        $categoriesById = $this->categoryIndex();
 
         $processed = $created = $updated = $errors = 0;
         foreach ($products as $product) {
@@ -236,44 +242,62 @@ final class SyncCoordinator
     private function statusCandidates(array $product): array
     {
         $values = [];
-        foreach (['product_status', 'status', 'product_status_id', 'product_status_code', 'product_status_name'] as $key) {
-            if (!isset($product[$key])) {
-                continue;
-            }
-            $val = $product[$key];
-            if (is_array($val)) {
-                foreach (['id', 'code', 'name', 'label', 'value'] as $sub) {
-                    if (isset($val[$sub]) && is_scalar($val[$sub])) {
-                        $values[] = strtolower((string) $val[$sub]);
-                    }
+        $status = $product['_product_status'] ?? $product['product_status'] ?? $product['status'] ?? null;
+        if (is_array($status)) {
+            $subKeys = [
+                'product_status_id', 'product_status_description', 'product_status_internal',
+                'id', 'code', 'name', 'description', 'internal', 'label', 'value',
+            ];
+            foreach ($subKeys as $sub) {
+                if (isset($status[$sub]) && is_scalar($status[$sub])) {
+                    $values[] = strtolower((string) $status[$sub]);
                 }
-            } elseif (is_scalar($val)) {
-                $values[] = strtolower((string) $val);
             }
+        } elseif (is_scalar($status)) {
+            $values[] = strtolower((string) $status);
         }
         return $values;
     }
 
     /**
-     * @param mixed $result
+     * Fetch the full category tree once per run and index it by category id.
+     * The getProducts response only references categories by id, so names and
+     * hierarchy must come from getCategories.
+     *
      * @return array<int, array<string, mixed>>
      */
-    private function indexCategories(mixed $result): array
+    private function categoryIndex(): array
     {
-        if (!is_array($result)) {
-            return [];
+        if ($this->categoryIndex !== null) {
+            return $this->categoryIndex;
         }
-        $list = $result['categories'] ?? [];
+
+        try {
+            $result = $this->client->call('getCategories', ['page' => 1, 'limit' => 1000]);
+        } catch (\Throwable $e) {
+            $this->logger->error('getCategories failed', ['error' => $e->getMessage()]);
+            return $this->categoryIndex = [];
+        }
+
+        $list = [];
+        if (is_array($result)) {
+            $list = $result['categories'] ?? $result['_categories'] ?? $result;
+        }
         if (!is_array($list)) {
-            return [];
+            $list = [];
         }
+
         $byId = [];
         foreach ($list as $cat) {
-            if (is_array($cat) && isset($cat['category_id'])) {
-                $byId[(int) $cat['category_id']] = $cat;
+            if (!is_array($cat)) {
+                continue;
+            }
+            $id = (int) ($cat['product_category_id'] ?? $cat['category_id'] ?? $cat['id'] ?? 0);
+            if ($id > 0) {
+                $byId[$id] = $cat;
             }
         }
-        return $byId;
+        return $this->categoryIndex = $byId;
     }
 
     private function initialDelta(): string

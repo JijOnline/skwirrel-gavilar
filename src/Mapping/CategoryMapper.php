@@ -22,14 +22,15 @@ final class CategoryMapper
      */
     public function upsert(array $category, array $allById = []): array
     {
-        $skwirrelId = (int) ($category['category_id'] ?? 0);
+        $skwirrelId = (int) ($category['product_category_id'] ?? $category['category_id'] ?? $category['id'] ?? 0);
         if ($skwirrelId <= 0) {
             return [];
         }
 
-        $parentSkwirrelId = (int) ($category['parent_id'] ?? 0);
+        $parentSkwirrelId = (int) ($category['super_category_id'] ?? $category['parent_id'] ?? $category['parent'] ?? 0);
         $parentByLang = [];
-        if ($parentSkwirrelId > 0 && isset($allById[$parentSkwirrelId])) {
+        // super_category_id can be a self-reference or a root sentinel — guard against loops.
+        if ($parentSkwirrelId > 0 && $parentSkwirrelId !== $skwirrelId && isset($allById[$parentSkwirrelId])) {
             $parentByLang = $this->upsert($allById[$parentSkwirrelId], $allById);
         }
 
@@ -101,19 +102,29 @@ final class CategoryMapper
      */
     private function resolveNamesByLang(array $category): array
     {
-        $defaultName = (string) ($category['name'] ?? '');
         $defaultLang = $this->polylang->defaultLanguage();
+        $defaultName = '';
+        foreach (['name', 'category_name', 'product_category_name', 'category_description', 'product_category_description', 'description', 'title'] as $key) {
+            if (!empty($category[$key]) && is_scalar($category[$key])) {
+                $defaultName = (string) $category[$key];
+                break;
+            }
+        }
         $namesByLang = [$defaultLang => $defaultName];
 
-        $translations = $category['translations'] ?? [];
+        $translations = $category['_category_translations'] ?? $category['translations'] ?? [];
         if (is_array($translations)) {
             foreach ($translations as $localeKey => $translation) {
-                $localeCode = is_array($translation) ? (string) ($translation['locale'] ?? $localeKey) : (string) $localeKey;
+                $localeCode = is_array($translation)
+                    ? (string) ($translation['language'] ?? $translation['locale'] ?? $localeKey)
+                    : (string) $localeKey;
                 $slug = $this->polylang->resolveSlug($localeCode);
                 if ($slug === null) {
                     continue;
                 }
-                $name = is_array($translation) ? (string) ($translation['name'] ?? '') : (string) $translation;
+                $name = is_array($translation)
+                    ? (string) ($translation['name'] ?? $translation['category_description'] ?? $translation['description'] ?? '')
+                    : (string) $translation;
                 if ($name !== '') {
                     $namesByLang[$slug] = $name;
                 }
