@@ -27,9 +27,10 @@ final class CategoryMapper
             return [];
         }
 
-        $parentSkwirrelId = (int) ($category['super_category_id'] ?? $category['parent_id'] ?? $category['parent'] ?? 0);
+        // parent_category_id is the real hierarchy parent (null = top-level).
+        // super_category_id is a root container (always 1 here) — not a parent.
+        $parentSkwirrelId = (int) ($category['parent_category_id'] ?? $category['parent_id'] ?? 0);
         $parentByLang = [];
-        // super_category_id can be a self-reference or a root sentinel — guard against loops.
         if ($parentSkwirrelId > 0 && $parentSkwirrelId !== $skwirrelId && isset($allById[$parentSkwirrelId])) {
             $parentByLang = $this->upsert($allById[$parentSkwirrelId], $allById);
         }
@@ -39,7 +40,16 @@ final class CategoryMapper
 
         $termIdsByLang = [];
         foreach ($this->polylang->languages() as $slug) {
-            $name = $namesByLang[$slug] ?? $namesByLang[$this->polylang->defaultLanguage()] ?? sprintf('Category %d', $skwirrelId);
+            // Skwirrel may return no category name — fall back to a stable placeholder
+            // ("Category 14"). The term stays linked by _skwirrel_category_id, so once
+            // real names are available a later sync renames it in place.
+            $name = $namesByLang[$slug] ?? '';
+            if ($name === '') {
+                $name = $namesByLang[$this->polylang->defaultLanguage()] ?? '';
+            }
+            if ($name === '') {
+                $name = sprintf('Category %d', $skwirrelId);
+            }
             $parentTermId = $parentByLang[$slug] ?? 0;
 
             $termIdsByLang[$slug] = $this->upsertOneTerm(
