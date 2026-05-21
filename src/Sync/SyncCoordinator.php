@@ -143,9 +143,9 @@ final class SyncCoordinator
     private function fetchAndApplyPage(?string $since, int $page, string $runId, string $mode): array
     {
         $params = [
-            'dynamic_selection_id' => $this->settings->dynamicSelectionId(),
             'page' => $page,
             'limit' => self::PAGE_SIZE,
+            'include_product_status' => true,
             'include_categories' => true,
             'include_product_translations' => true,
             'include_product_seo' => true,
@@ -154,16 +154,25 @@ final class SyncCoordinator
             'include_languages' => true,
         ];
 
+        // Optional gating filter — Gavilar gates by status, not a selection.
+        $selectionId = $this->settings->dynamicSelectionId();
+        if ($selectionId !== null) {
+            $params['dynamic_selection_id'] = $selectionId;
+        }
+
         if ($since !== null) {
             $params['updated_on'] = ['>=' => $since];
         }
 
         $result = $this->client->call('getProducts', $params);
-        $products = is_array($result) ? ($result['products'] ?? $result) : [];
-        if (!is_array($products)) {
-            $products = [];
+        $rawProducts = is_array($result) ? ($result['products'] ?? $result) : [];
+        if (!is_array($rawProducts)) {
+            $rawProducts = [];
         }
+        // Pagination must be decided on the unfiltered page size.
+        $hasMore = count($rawProducts) === self::PAGE_SIZE;
 
+        $products = $this->filterByStatus($rawProducts);
         $categoriesById = $this->indexCategories($result);
 
         $processed = $created = $updated = $errors = 0;
@@ -185,7 +194,6 @@ final class SyncCoordinator
             }
         }
 
-        $hasMore = count($products) === self::PAGE_SIZE;
         return [
             'run_id' => $runId,
             'processed' => $processed,
@@ -194,6 +202,55 @@ final class SyncCoordinator
             'errors' => $errors,
             'next_page' => $hasMore ? $page + 1 : null,
         ];
+    }
+
+    /**
+     * Keep only products whose status matches the configured value (e.g. "available").
+     * Empty setting = no filtering. Matching is tolerant: the configured string is
+     * compared case-insensitively against the status id, code, name and label,
+     * whether the status is a scalar or a nested object.
+     *
+     * @param array<mixed> $products
+     * @return array<int, mixed>
+     */
+    private function filterByStatus(array $products): array
+    {
+        $wanted = strtolower($this->settings->productStatus());
+        if ($wanted === '') {
+            return array_values($products);
+        }
+
+        return array_values(array_filter($products, function ($product) use ($wanted): bool {
+            if (!is_array($product)) {
+                return false;
+            }
+            return in_array($wanted, $this->statusCandidates($product), true);
+        }));
+    }
+
+    /**
+     * @param array<string, mixed> $product
+     * @return string[] lower-cased status values found on the product
+     */
+    private function statusCandidates(array $product): array
+    {
+        $values = [];
+        foreach (['product_status', 'status', 'product_status_id', 'product_status_code', 'product_status_name'] as $key) {
+            if (!isset($product[$key])) {
+                continue;
+            }
+            $val = $product[$key];
+            if (is_array($val)) {
+                foreach (['id', 'code', 'name', 'label', 'value'] as $sub) {
+                    if (isset($val[$sub]) && is_scalar($val[$sub])) {
+                        $values[] = strtolower((string) $val[$sub]);
+                    }
+                }
+            } elseif (is_scalar($val)) {
+                $values[] = strtolower((string) $val);
+            }
+        }
+        return $values;
     }
 
     /**

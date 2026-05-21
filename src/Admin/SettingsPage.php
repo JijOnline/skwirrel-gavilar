@@ -33,8 +33,6 @@ final class SettingsPage
         add_action('admin_post_skwirrel_gavilar_detect_locales', [$this, 'handleDetectLocales']);
         add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
         add_action('admin_post_skwirrel_gavilar_reset_cursor', [$this, 'handleResetCursor']);
-        add_action('admin_post_skwirrel_gavilar_list_selections', [$this, 'handleListSelections']);
-        add_action('admin_post_skwirrel_gavilar_diagnose', [$this, 'handleDiagnose']);
     }
 
     public function maybeRenderNotice(): void
@@ -69,6 +67,7 @@ final class SettingsPage
         register_setting(self::OPTION_GROUP, Settings::OPT_API_URL, ['type' => 'string', 'sanitize_callback' => [self::class, 'sanitizeUrl']]);
         register_setting(self::OPTION_GROUP, Settings::OPT_CLIENT_ID, ['type' => 'string', 'sanitize_callback' => 'sanitize_text_field']);
         register_setting(self::OPTION_GROUP, Settings::OPT_DYNAMIC_SELECTION_ID, ['type' => 'integer', 'sanitize_callback' => 'absint']);
+        register_setting(self::OPTION_GROUP, Settings::OPT_PRODUCT_STATUS, ['type' => 'string', 'sanitize_callback' => 'sanitize_text_field']);
 
         register_setting(self::OPTION_GROUP, Settings::OPT_CLIENT_SECRET, [
             'type' => 'string',
@@ -137,23 +136,22 @@ final class SettingsPage
                         </td>
                     </tr>
                     <tr>
-                        <th><label for="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>"><?php esc_html_e('Dynamic selection ID', 'skwirrel-gavilar'); ?></label></th>
+                        <th><label for="<?php echo esc_attr(Settings::OPT_PRODUCT_STATUS); ?>"><?php esc_html_e('Product status filter', 'skwirrel-gavilar'); ?></label></th>
+                        <td>
+                            <input type="text" class="regular-text" id="<?php echo esc_attr(Settings::OPT_PRODUCT_STATUS); ?>" name="<?php echo esc_attr(Settings::OPT_PRODUCT_STATUS); ?>" value="<?php echo esc_attr($settings->productStatus()); ?>" placeholder="available">
+                            <p class="description"><?php esc_html_e('Only products with this status are synced (e.g. "available"). Matched against the status id/code/name. Leave empty to sync every product.', 'skwirrel-gavilar'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><label for="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>"><?php esc_html_e('Dynamic selection ID (optional)', 'skwirrel-gavilar'); ?></label></th>
                         <td>
                             <input type="number" min="0" id="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>" name="<?php echo esc_attr(Settings::OPT_DYNAMIC_SELECTION_ID); ?>" value="<?php echo esc_attr((string) $settings->dynamicSelectionId()); ?>">
-                            <p class="description"><?php esc_html_e('The Skwirrel selection that gates which products sync to this site. Click "List selections" below after entering credentials to discover the ID.', 'skwirrel-gavilar'); ?></p>
+                            <p class="description"><?php esc_html_e('Optional. If Skwirrel gates the website with a dynamic selection, enter its numeric ID here. Leave empty to rely on the product status filter above.', 'skwirrel-gavilar'); ?></p>
                         </td>
                     </tr>
                 </table>
                 <?php submit_button(); ?>
             </form>
-
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:-1em; margin-bottom:1em;">
-                <?php wp_nonce_field(self::NONCE_ACTION); ?>
-                <input type="hidden" name="action" value="skwirrel_gavilar_list_selections">
-                <?php submit_button(__('List selections', 'skwirrel-gavilar'), 'secondary small', 'submit', false); ?>
-            </form>
-
-            <?php $this->renderSelectionsCache(); ?>
 
             <hr>
             <h2><?php esc_html_e('Locale mapping', 'skwirrel-gavilar'); ?></h2>
@@ -185,17 +183,9 @@ final class SettingsPage
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
-                <input type="hidden" name="action" value="skwirrel_gavilar_diagnose">
-                <?php submit_button(__('Diagnose OAuth', 'skwirrel-gavilar'), 'secondary', 'submit', false); ?>
-            </form>
-
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
-                <?php wp_nonce_field(self::NONCE_ACTION); ?>
                 <input type="hidden" name="action" value="skwirrel_gavilar_sync_now">
                 <?php submit_button(__('Sync now (delta)', 'skwirrel-gavilar'), 'primary', 'submit', false); ?>
             </form>
-
-            <?php $this->renderDiagnoseResult(); ?>
 
             <button type="button" class="button button-secondary" id="skwirrel-gavilar-full-resync"><?php esc_html_e('Full resync', 'skwirrel-gavilar'); ?></button>
 
@@ -299,33 +289,6 @@ final class SettingsPage
         );
     }
 
-    private function renderDiagnoseResult(): void
-    {
-        $result = get_transient('skwirrel_gavilar_diagnose_result');
-        if (!is_array($result) || empty($result['rows'])) {
-            return;
-        }
-        ?>
-        <div style="padding:1em; background:#f6f7f7; border-left:4px solid #2271b1; max-width:900px; margin-top:1em;">
-            <p style="margin-top:0;"><strong><?php esc_html_e('OAuth-diagnose', 'skwirrel-gavilar'); ?></strong>
-                — <code><?php echo esc_html((string) ($result['token_url'] ?? '')); ?></code></p>
-            <table class="widefat striped">
-                <tbody>
-                    <?php foreach ((array) $result['rows'] as $label => $value): ?>
-                        <tr>
-                            <td style="width:340px;"><strong><?php echo esc_html((string) $label); ?></strong></td>
-                            <td><code style="white-space:pre-wrap; word-break:break-all;"><?php echo esc_html((string) $value); ?></code></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            <p class="description" style="margin-bottom:0;">
-                <?php esc_html_e('Werkt de curl-achtige variant wel maar de plugin-variant niet? Dan ligt het aan een header. Falen beide met 404? Dan behandelt Skwirrel dit IP/deze server anders — geef het uitgaande IP door aan Skwirrel voor de allowlist.', 'skwirrel-gavilar'); ?>
-            </p>
-        </div>
-        <?php
-    }
-
     private function renderResyncScript(): void
     {
         $ajaxUrl = admin_url('admin-ajax.php');
@@ -414,38 +377,6 @@ final class SettingsPage
             }
         })();
         </script>
-        <?php
-    }
-
-    private function renderSelectionsCache(): void
-    {
-        $cache = get_transient('skwirrel_gavilar_selections_cache');
-        if (!is_array($cache) || empty($cache['selections'])) {
-            return;
-        }
-        ?>
-        <div style="padding:1em; background:#f6f7f7; border-left:4px solid #2271b1; max-width:600px; margin-bottom:1em;">
-            <p style="margin-top:0;"><strong><?php esc_html_e('Selections discovered', 'skwirrel-gavilar'); ?></strong>
-                <small style="color:#777;">(<?php echo esc_html((string) ($cache['method'] ?? '')); ?>)</small>
-            </p>
-            <table class="widefat striped">
-                <thead>
-                    <tr>
-                        <th><?php esc_html_e('ID', 'skwirrel-gavilar'); ?></th>
-                        <th><?php esc_html_e('Name', 'skwirrel-gavilar'); ?></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ((array) $cache['selections'] as $sel): ?>
-                        <tr>
-                            <td><code><?php echo (int) ($sel['id'] ?? 0); ?></code></td>
-                            <td><?php echo esc_html((string) ($sel['name'] ?? '')); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            <p class="description" style="margin-bottom:0;"><?php esc_html_e('Paste the ID into "Dynamic selection ID" above and save. Cached for 5 minutes.', 'skwirrel-gavilar'); ?></p>
-        </div>
         <?php
     }
 
@@ -608,199 +539,6 @@ final class SettingsPage
 
         wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
         exit;
-    }
-
-    public function handleListSelections(): void
-    {
-        if (!current_user_can('manage_options')) {
-            wp_die('forbidden');
-        }
-        check_admin_referer(self::NONCE_ACTION);
-
-        $candidates = [
-            'getDynamicSelections',
-            'getDynamicSelection',
-            'getSelections',
-            'getSelection',
-            'getDynamicSelectionList',
-            'getSelectionList',
-            'listDynamicSelections',
-            'listSelections',
-        ];
-
-        $selections = null;
-        $usedMethod = null;
-        $lastError = '';
-
-        foreach ($candidates as $method) {
-            try {
-                $result = $this->client->call($method, []);
-                $list = $this->extractSelectionList($result);
-                if (!empty($list)) {
-                    $selections = $list;
-                    $usedMethod = $method;
-                    break;
-                }
-            } catch (\Throwable $e) {
-                $lastError = $e->getMessage();
-            }
-        }
-
-        if ($selections === null) {
-            set_transient('skwirrel_gavilar_admin_notice', [
-                'type' => 'error',
-                'message' => sprintf(
-                    /* translators: %s: last error message from the API */
-                    __('Could not discover selections via any known RPC method. Last error: %s. Ask the Skwirrel admin for the numeric ID directly.', 'skwirrel-gavilar'),
-                    $lastError
-                ),
-            ], 60);
-        } else {
-            set_transient('skwirrel_gavilar_selections_cache', [
-                'method' => $usedMethod,
-                'selections' => $selections,
-            ], 5 * MINUTE_IN_SECONDS);
-            set_transient('skwirrel_gavilar_admin_notice', [
-                'type' => 'success',
-                'message' => sprintf(
-                    /* translators: 1: number of selections, 2: RPC method that worked */
-                    __('Found %1$d selection(s) via %2$s. See the table below.', 'skwirrel-gavilar'),
-                    count($selections),
-                    $usedMethod
-                ),
-            ], 60);
-        }
-
-        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
-        exit;
-    }
-
-    /**
-     * Normalise the various response shapes Skwirrel might return into a list of
-     * `['id' => int, 'name' => string]`. Returns [] if the shape doesn't look right.
-     *
-     * @return array<int, array{id:int,name:string}>
-     */
-    private function extractSelectionList(mixed $result): array
-    {
-        if (!is_array($result)) {
-            return [];
-        }
-        // Try common nested keys first, then fall back to treating the whole result as the list.
-        foreach (['selections', 'dynamic_selections', 'items', 'data'] as $key) {
-            if (isset($result[$key]) && is_array($result[$key])) {
-                return $this->mapSelectionEntries($result[$key]);
-            }
-        }
-        return $this->mapSelectionEntries($result);
-    }
-
-    /**
-     * @param array<mixed> $list
-     * @return array<int, array{id:int,name:string}>
-     */
-    private function mapSelectionEntries(array $list): array
-    {
-        $out = [];
-        foreach ($list as $entry) {
-            if (!is_array($entry)) {
-                continue;
-            }
-            $id = (int) ($entry['id'] ?? $entry['selection_id'] ?? $entry['dynamic_selection_id'] ?? 0);
-            $name = (string) ($entry['name'] ?? $entry['title'] ?? $entry['label'] ?? '');
-            if ($id > 0) {
-                $out[] = ['id' => $id, 'name' => $name !== '' ? $name : sprintf('Selection %d', $id)];
-            }
-        }
-        return $out;
-    }
-
-    public function handleDiagnose(): void
-    {
-        if (!current_user_can('manage_options')) {
-            wp_die('forbidden');
-        }
-        check_admin_referer(self::NONCE_ACTION);
-
-        $settings = new Settings();
-        $tokenUrl = $settings->tokenUrl();
-        $auth = 'Basic ' . base64_encode($settings->clientId() . ':' . $settings->clientSecret());
-
-        $rows = [];
-
-        // Outbound IP of this server — needed if Skwirrel restricts the OAuth client by IP.
-        $ipResp = wp_remote_get('https://api.ipify.org', ['timeout' => 10]);
-        $rows['Uitgaand IP (staging-server)'] = is_wp_error($ipResp)
-            ? 'ERROR: ' . $ipResp->get_error_message()
-            : trim((string) wp_remote_retrieve_body($ipResp));
-
-        $tokenBody = ['grant_type' => 'client_credentials'];
-
-        // Variant A — exactly what the plugin normally sends.
-        $rows['POST token — plugin-headers (Accept: application/json)'] = $this->summariseResponse(
-            wp_remote_post($tokenUrl, [
-                'timeout' => 20,
-                'redirection' => 0,
-                'headers' => [
-                    'Accept' => 'application/json',
-                    'Authorization' => $auth,
-                    'Content-Type' => 'application/x-www-form-urlencoded',
-                ],
-                'body' => $tokenBody,
-            ])
-        );
-
-        // Variant B — mimic the working curl as closely as WP allows.
-        $rows['POST token — curl-achtige headers (Accept: */*, UA curl)'] = $this->summariseResponse(
-            wp_remote_post($tokenUrl, [
-                'timeout' => 20,
-                'redirection' => 0,
-                'user-agent' => 'curl/8.7.1',
-                'headers' => [
-                    'Accept' => '*/*',
-                    'Authorization' => $auth,
-                    'Content-Type' => 'application/x-www-form-urlencoded',
-                ],
-                'body' => $tokenBody,
-            ])
-        );
-
-        // Variant C — a bare GET, just to see how the route responds without a body.
-        $rows['GET token-URL (zonder body)'] = $this->summariseResponse(
-            wp_remote_get($tokenUrl, ['timeout' => 20, 'redirection' => 0])
-        );
-
-        set_transient('skwirrel_gavilar_diagnose_result', [
-            'token_url' => $tokenUrl,
-            'rows' => $rows,
-        ], 10 * MINUTE_IN_SECONDS);
-
-        set_transient('skwirrel_gavilar_admin_notice', [
-            'type' => 'success',
-            'message' => __('Diagnose uitgevoerd — zie de resultaten onderaan.', 'skwirrel-gavilar'),
-        ], 30);
-
-        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
-        exit;
-    }
-
-    /** @param array|\WP_Error $resp */
-    private function summariseResponse($resp): string
-    {
-        if (is_wp_error($resp)) {
-            return 'ERROR: ' . $resp->get_error_message();
-        }
-        $code = (int) wp_remote_retrieve_response_code($resp);
-        $body = trim((string) wp_remote_retrieve_body($resp));
-        $location = wp_remote_retrieve_header($resp, 'location');
-        $out = 'HTTP ' . $code;
-        if ($location !== '') {
-            $out .= ' → Location: ' . $location;
-        }
-        if ($body !== '') {
-            $out .= ' — ' . substr($body, 0, 160);
-        }
-        return $out;
     }
 
     public function handleResetCursor(): void

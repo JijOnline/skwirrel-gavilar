@@ -10,6 +10,7 @@ final class Settings
     public const OPT_CLIENT_ID = 'skwirrel_gavilar_client_id';
     public const OPT_CLIENT_SECRET = 'skwirrel_gavilar_client_secret';
     public const OPT_DYNAMIC_SELECTION_ID = 'skwirrel_gavilar_dynamic_selection_id';
+    public const OPT_PRODUCT_STATUS = 'skwirrel_gavilar_product_status';
     public const OPT_LOCALE_MAP = 'skwirrel_gavilar_locale_map';
     public const OPT_LAST_SYNCED_AT = 'skwirrel_gavilar_last_synced_at';
     public const OPT_CURRENT_RUN_ID = 'skwirrel_gavilar_current_run_id';
@@ -73,6 +74,15 @@ final class Settings
         return $raw === '' ? null : (int) $raw;
     }
 
+    /**
+     * Product-status filter (e.g. "available"). Empty = no status filtering.
+     * Matched tolerantly against the product status id/code/name in the response.
+     */
+    public function productStatus(): string
+    {
+        return trim((string) get_option(self::OPT_PRODUCT_STATUS, ''));
+    }
+
     public function lastSyncedAt(): ?string
     {
         $val = get_option(self::OPT_LAST_SYNCED_AT, '');
@@ -99,10 +109,12 @@ final class Settings
 
     public function isConfigured(): bool
     {
+        // The dynamic selection ID is optional — Gavilar gates products by
+        // product status, not a selection. Only the OAuth credentials + API
+        // URL are mandatory for the sync to run.
         return $this->tokenUrl() !== ''
             && $this->apiUrl() !== ''
             && $this->clientId() !== ''
-            && $this->clientSecret() !== ''
-            && $this->dynamicSelectionId() !== null;
+            && $this->clientSecret() !== '';
     }
 }

@@ -7,8 +7,8 @@ WordPress is a read-only presentation layer.
 ## What it does
 
 - Pulls products, categories, custom features and attachments from the Skwirrel
-  v2 JSON-RPC API, gated by a configurable **dynamic selection** (so editors
-  control which products appear on the public site from inside Skwirrel).
+  v2 JSON-RPC API, gated by a configurable **product status** filter (e.g.
+  "available") and, optionally, a Skwirrel **dynamic selection**.
 - Stores each product as a `pim_product` custom post type with a hierarchical
   `pim_category` taxonomy.
 - Multilingual via **Polylang** (Free or Pro): each Skwirrel translation lands
@@ -22,7 +22,7 @@ WordPress is a read-only presentation layer.
 - Runs a daily delta via WP-Cron (using Skwirrel's `updated_on` filter).
 - Manual **Full resync** from the admin (AJAX page-loop) or the CLI:
   `wp skwirrel sync --full`. End-of-full-run pass soft-deletes any
-  `pim_product` no longer in the dynamic selection.
+  `pim_product` no longer returned by the sync query.
 
 ## Requirements
 
@@ -52,7 +52,8 @@ fallback autoloader. Run `composer install` only if you want the dev tooling
 | OAuth2 token URL | Skwirrel → Data → Web Services → Edit your OAuth2 client. |
 | API URL | Same screen. JSON-RPC endpoint, e.g. `https://example.skwirrel.eu/jsonrpc`. |
 | Client ID / secret | Same screen. The secret is encrypted at rest with AES-256-GCM keyed off `AUTH_KEY`. |
-| Dynamic selection ID | The Skwirrel selection that gates which products sync. Ask the PIM admin which one. |
+| Product status filter | Only products with this status sync (e.g. `available`). Matched against the status id/code/name. Empty = sync everything. |
+| Dynamic selection ID | Optional. If Skwirrel gates the site with a dynamic selection, enter its numeric ID; otherwise leave empty. |
 | Locale mapping | Click **Auto-detect locales** after credentials are saved — it pulls one product and reads its `translations`. Adjust the Skwirrel-code → Polylang-slug dropdowns if the auto-mapping is wrong. |
 
 After saving, click **Test connection** to verify, then **Sync now (delta)**
@@ -127,7 +128,8 @@ src/
 | Term meta | `_skwirrel_category_id` | Canonical Skwirrel category link. |
 | Attachment meta | `_skwirrel_attachment_id` / `_skwirrel_attachment_url` | Dedup keys. |
 | Option | `skwirrel_gavilar_last_synced_at` | Delta cursor (UTC). |
-| Option | `skwirrel_gavilar_dynamic_selection_id` | Required gating filter. |
+| Option | `skwirrel_gavilar_product_status` | Product status filter (e.g. "available"). |
+| Option | `skwirrel_gavilar_dynamic_selection_id` | Optional dynamic-selection gating filter. |
 | Option | `skwirrel_gavilar_locale_map` | Skwirrel locale code → Polylang slug. |
 | Option | `skwirrel_gavilar_full_resync_state` | JSON-encoded cursor for the AJAX full resync. |
 | Table | `wp_skwirrel_sync_log` | Run history (last 20 shown on the settings page). |
