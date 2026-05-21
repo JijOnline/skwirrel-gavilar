@@ -67,7 +67,12 @@ final class SettingsPage
         register_setting(self::OPTION_GROUP, Settings::OPT_TOKEN_URL, ['type' => 'string', 'sanitize_callback' => [self::class, 'sanitizeUrl']]);
         register_setting(self::OPTION_GROUP, Settings::OPT_API_URL, ['type' => 'string', 'sanitize_callback' => [self::class, 'sanitizeUrl']]);
         register_setting(self::OPTION_GROUP, Settings::OPT_CLIENT_ID, ['type' => 'string', 'sanitize_callback' => 'sanitize_text_field']);
-        register_setting(self::OPTION_GROUP, Settings::OPT_DYNAMIC_SELECTION_ID, ['type' => 'integer', 'sanitize_callback' => 'absint']);
+        register_setting(self::OPTION_GROUP, Settings::OPT_DYNAMIC_SELECTION_ID, [
+            'type' => 'string',
+            // Store an empty / zero field as '' rather than 0, so the field
+            // renders empty and getProducts never receives a bogus id of 0.
+            'sanitize_callback' => static fn ($v): string => ((int) $v) > 0 ? (string) (int) $v : '',
+        ]);
         register_setting(self::OPTION_GROUP, Settings::OPT_PRODUCT_STATUS, ['type' => 'string', 'sanitize_callback' => 'sanitize_text_field']);
 
         register_setting(self::OPTION_GROUP, Settings::OPT_CLIENT_SECRET, [
