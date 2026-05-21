@@ -142,6 +142,9 @@ final class SyncCoordinator
      */
     private function fetchAndApplyPage(?string $since, int $page, string $runId, string $mode): array
     {
+        // Only documented getProducts include_* flags. "include_languages" rejects
+        // a boolean value, and "include_custom_features" is not a real parameter
+        // (custom features come from separate Skwirrel methods) — both omitted.
         $params = [
             'page' => $page,
             'limit' => self::PAGE_SIZE,
@@ -149,9 +152,7 @@ final class SyncCoordinator
             'include_categories' => true,
             'include_product_translations' => true,
             'include_product_seo' => true,
-            'include_custom_features' => true,
             'include_attachments' => true,
-            'include_languages' => true,
         ];
 
         // Optional gating filter — Gavilar gates by status, not a selection.

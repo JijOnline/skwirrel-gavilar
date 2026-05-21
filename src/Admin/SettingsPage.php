@@ -591,7 +591,6 @@ final class SettingsPage
                 'page' => 1,
                 'limit' => 1,
                 'include_product_translations' => true,
-                'include_languages' => true,
             ]);
             $products = is_array($result) ? ($result['products'] ?? $result) : [];
             $first = is_array($products) && !empty($products) ? $products[0] : null;
