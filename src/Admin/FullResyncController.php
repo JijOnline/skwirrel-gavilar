@@ -41,6 +41,10 @@ final class FullResyncController
     {
         $this->guard();
 
+        // One step downloads images for a page of products — give it room.
+        @set_time_limit(180);
+        ignore_user_abort(true);
+
         $state = FullResyncState::load();
         if (!$state->isRunning()) {
             wp_send_json_error(['state' => $state->toArray(), 'message' => 'No full resync is running.']);

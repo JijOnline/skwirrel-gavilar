@@ -14,7 +14,10 @@ final class SyncCoordinator
     public const MODE_DELTA = 'delta';
     public const MODE_FULL = 'full';
 
-    private const PAGE_SIZE = 500;
+    // Small page size: each page is processed in one request (an admin AJAX
+    // step, or one cron iteration) and includes inline image downloads, so a
+    // page must finish well within typical PHP/web-server timeouts.
+    private const PAGE_SIZE = 15;
 
     /** @var array<int, array<string, mixed>>|null Memoised getCategories index for the current run. */
     private ?array $categoryIndex = null;
