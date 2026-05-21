@@ -34,6 +34,7 @@ final class SettingsPage
         add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
         add_action('admin_post_skwirrel_gavilar_reset_cursor', [$this, 'handleResetCursor']);
         add_action('admin_post_skwirrel_gavilar_list_selections', [$this, 'handleListSelections']);
+        add_action('admin_post_skwirrel_gavilar_diagnose', [$this, 'handleDiagnose']);
     }
 
     public function maybeRenderNotice(): void
@@ -184,9 +185,17 @@ final class SettingsPage
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
+                <input type="hidden" name="action" value="skwirrel_gavilar_diagnose">
+                <?php submit_button(__('Diagnose OAuth', 'skwirrel-gavilar'), 'secondary', 'submit', false); ?>
+            </form>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
+                <?php wp_nonce_field(self::NONCE_ACTION); ?>
                 <input type="hidden" name="action" value="skwirrel_gavilar_sync_now">
                 <?php submit_button(__('Sync now (delta)', 'skwirrel-gavilar'), 'primary', 'submit', false); ?>
             </form>
+
+            <?php $this->renderDiagnoseResult(); ?>
 
             <button type="button" class="button button-secondary" id="skwirrel-gavilar-full-resync"><?php esc_html_e('Full resync', 'skwirrel-gavilar'); ?></button>
 
@@ -288,6 +297,33 @@ final class SettingsPage
             esc_attr($colour),
             esc_html($status)
         );
+    }
+
+    private function renderDiagnoseResult(): void
+    {
+        $result = get_transient('skwirrel_gavilar_diagnose_result');
+        if (!is_array($result) || empty($result['rows'])) {
+            return;
+        }
+        ?>
+        <div style="padding:1em; background:#f6f7f7; border-left:4px solid #2271b1; max-width:900px; margin-top:1em;">
+            <p style="margin-top:0;"><strong><?php esc_html_e('OAuth-diagnose', 'skwirrel-gavilar'); ?></strong>
+                — <code><?php echo esc_html((string) ($result['token_url'] ?? '')); ?></code></p>
+            <table class="widefat striped">
+                <tbody>
+                    <?php foreach ((array) $result['rows'] as $label => $value): ?>
+                        <tr>
+                            <td style="width:340px;"><strong><?php echo esc_html((string) $label); ?></strong></td>
+                            <td><code style="white-space:pre-wrap; word-break:break-all;"><?php echo esc_html((string) $value); ?></code></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p class="description" style="margin-bottom:0;">
+                <?php esc_html_e('Werkt de curl-achtige variant wel maar de plugin-variant niet? Dan ligt het aan een header. Falen beide met 404? Dan behandelt Skwirrel dit IP/deze server anders — geef het uitgaande IP door aan Skwirrel voor de allowlist.', 'skwirrel-gavilar'); ?>
+            </p>
+        </div>
+        <?php
     }
 
     private function renderResyncScript(): void
@@ -675,6 +711,94 @@ final class SettingsPage
             if ($id > 0) {
                 $out[] = ['id' => $id, 'name' => $name !== '' ? $name : sprintf('Selection %d', $id)];
             }
+        }
+        return $out;
+    }
+
+    public function handleDiagnose(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        $settings = new Settings();
+        $tokenUrl = $settings->tokenUrl();
+        $auth = 'Basic ' . base64_encode($settings->clientId() . ':' . $settings->clientSecret());
+
+        $rows = [];
+
+        // Outbound IP of this server — needed if Skwirrel restricts the OAuth client by IP.
+        $ipResp = wp_remote_get('https://api.ipify.org', ['timeout' => 10]);
+        $rows['Uitgaand IP (staging-server)'] = is_wp_error($ipResp)
+            ? 'ERROR: ' . $ipResp->get_error_message()
+            : trim((string) wp_remote_retrieve_body($ipResp));
+
+        $tokenBody = ['grant_type' => 'client_credentials'];
+
+        // Variant A — exactly what the plugin normally sends.
+        $rows['POST token — plugin-headers (Accept: application/json)'] = $this->summariseResponse(
+            wp_remote_post($tokenUrl, [
+                'timeout' => 20,
+                'redirection' => 0,
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Authorization' => $auth,
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                ],
+                'body' => $tokenBody,
+            ])
+        );
+
+        // Variant B — mimic the working curl as closely as WP allows.
+        $rows['POST token — curl-achtige headers (Accept: */*, UA curl)'] = $this->summariseResponse(
+            wp_remote_post($tokenUrl, [
+                'timeout' => 20,
+                'redirection' => 0,
+                'user-agent' => 'curl/8.7.1',
+                'headers' => [
+                    'Accept' => '*/*',
+                    'Authorization' => $auth,
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                ],
+                'body' => $tokenBody,
+            ])
+        );
+
+        // Variant C — a bare GET, just to see how the route responds without a body.
+        $rows['GET token-URL (zonder body)'] = $this->summariseResponse(
+            wp_remote_get($tokenUrl, ['timeout' => 20, 'redirection' => 0])
+        );
+
+        set_transient('skwirrel_gavilar_diagnose_result', [
+            'token_url' => $tokenUrl,
+            'rows' => $rows,
+        ], 10 * MINUTE_IN_SECONDS);
+
+        set_transient('skwirrel_gavilar_admin_notice', [
+            'type' => 'success',
+            'message' => __('Diagnose uitgevoerd — zie de resultaten onderaan.', 'skwirrel-gavilar'),
+        ], 30);
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
+    }
+
+    /** @param array|\WP_Error $resp */
+    private function summariseResponse($resp): string
+    {
+        if (is_wp_error($resp)) {
+            return 'ERROR: ' . $resp->get_error_message();
+        }
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = trim((string) wp_remote_retrieve_body($resp));
+        $location = wp_remote_retrieve_header($resp, 'location');
+        $out = 'HTTP ' . $code;
+        if ($location !== '') {
+            $out .= ' → Location: ' . $location;
+        }
+        if ($body !== '') {
+            $out .= ' — ' . substr($body, 0, 160);
         }
         return $out;
     }
