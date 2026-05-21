@@ -70,8 +70,10 @@ final class Settings
 
     public function dynamicSelectionId(): ?int
     {
-        $raw = get_option(self::OPT_DYNAMIC_SELECTION_ID, '');
-        return $raw === '' ? null : (int) $raw;
+        // WordPress' absint sanitizer stores an empty field as 0, so treat
+        // both '' and 0 as "no selection configured".
+        $raw = (int) get_option(self::OPT_DYNAMIC_SELECTION_ID, 0);
+        return $raw > 0 ? $raw : null;
     }
 
     /**
