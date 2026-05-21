@@ -33,6 +33,7 @@ final class SettingsPage
         add_action('admin_post_skwirrel_gavilar_detect_locales', [$this, 'handleDetectLocales']);
         add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
         add_action('admin_post_skwirrel_gavilar_reset_cursor', [$this, 'handleResetCursor']);
+        add_action('admin_post_skwirrel_gavilar_sample_product', [$this, 'handleSampleProduct']);
     }
 
     public function maybeRenderNotice(): void
@@ -183,11 +184,19 @@ final class SettingsPage
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
+                <input type="hidden" name="action" value="skwirrel_gavilar_sample_product">
+                <?php submit_button(__('Show sample product', 'skwirrel-gavilar'), 'secondary', 'submit', false); ?>
+            </form>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
+                <?php wp_nonce_field(self::NONCE_ACTION); ?>
                 <input type="hidden" name="action" value="skwirrel_gavilar_sync_now">
                 <?php submit_button(__('Sync now (delta)', 'skwirrel-gavilar'), 'primary', 'submit', false); ?>
             </form>
 
             <button type="button" class="button button-secondary" id="skwirrel-gavilar-full-resync"><?php esc_html_e('Full resync', 'skwirrel-gavilar'); ?></button>
+
+            <?php $this->renderSampleProduct(); ?>
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-left:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
@@ -539,6 +548,51 @@ final class SettingsPage
 
         wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
         exit;
+    }
+
+    public function handleSampleProduct(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        try {
+            $result = $this->client->call('getProducts', [
+                'page' => 1,
+                'limit' => 1,
+                'include_product_status' => true,
+                'include_categories' => true,
+                'include_product_translations' => true,
+                'include_product_seo' => true,
+                'include_attachments' => true,
+            ]);
+            $json = (string) wp_json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            set_transient('skwirrel_gavilar_sample_product', $json, 15 * MINUTE_IN_SECONDS);
+            set_transient('skwirrel_gavilar_admin_notice', [
+                'type' => 'success',
+                'message' => __('Sample product opgehaald — zie de raw JSON onderaan.', 'skwirrel-gavilar'),
+            ], 30);
+        } catch (\Throwable $e) {
+            set_transient('skwirrel_gavilar_admin_notice', ['type' => 'error', 'message' => $e->getMessage()], 30);
+        }
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
+    }
+
+    private function renderSampleProduct(): void
+    {
+        $json = get_transient('skwirrel_gavilar_sample_product');
+        if (!is_string($json) || $json === '') {
+            return;
+        }
+        ?>
+        <div style="margin-top:1em; max-width:1100px;">
+            <p><strong><?php esc_html_e('Sample product (raw JSON)', 'skwirrel-gavilar'); ?></strong></p>
+            <textarea readonly rows="20" style="width:100%; font-family:monospace; font-size:11px;"><?php echo esc_textarea($json); ?></textarea>
+        </div>
+        <?php
     }
 
     public function handleResetCursor(): void
