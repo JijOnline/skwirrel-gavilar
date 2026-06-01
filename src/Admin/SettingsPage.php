@@ -34,6 +34,7 @@ final class SettingsPage
         add_action('admin_post_skwirrel_gavilar_save_locale_map', [$this, 'handleSaveLocaleMap']);
         add_action('admin_post_skwirrel_gavilar_reset_cursor', [$this, 'handleResetCursor']);
         add_action('admin_post_skwirrel_gavilar_sample_product', [$this, 'handleSampleProduct']);
+        add_action('admin_post_skwirrel_gavilar_cleanup_categories', [$this, 'handleCleanupCategories']);
     }
 
     public function maybeRenderNotice(): void
@@ -202,6 +203,12 @@ final class SettingsPage
             <button type="button" class="button button-secondary" id="skwirrel-gavilar-full-resync"><?php esc_html_e('Full resync', 'skwirrel-gavilar'); ?></button>
 
             <?php $this->renderSampleProduct(); ?>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-left:1em;" onsubmit="return confirm(<?php echo wp_json_encode(__('Merge duplicate pim_category terms (one per language per Skwirrel category)? Product links are preserved.', 'skwirrel-gavilar')); ?>);">
+                <?php wp_nonce_field(self::NONCE_ACTION); ?>
+                <input type="hidden" name="action" value="skwirrel_gavilar_cleanup_categories">
+                <?php submit_button(__('Cleanup duplicate categories', 'skwirrel-gavilar'), 'link-delete', 'submit', false); ?>
+            </form>
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-left:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
@@ -620,6 +627,76 @@ final class SettingsPage
             );
         }
         echo '</div>';
+    }
+
+    public function handleCleanupCategories(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('forbidden');
+        }
+        check_admin_referer(self::NONCE_ACTION);
+
+        global $wpdb;
+        $taxonomy = \JijOnline\SkwirrelGavilar\Cpt\CategoryTaxonomy::SLUG;
+        $metaKey = \JijOnline\SkwirrelGavilar\Mapping\CategoryMapper::META_KEY;
+
+        // Group every pim_category term by (skwirrel_id, polylang_language).
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT t.term_id, tt.taxonomy, tm.meta_value AS skwirrel_id
+             FROM {$wpdb->terms} t
+             JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id
+             JOIN {$wpdb->termmeta} tm ON tm.term_id = t.term_id
+             WHERE tt.taxonomy = %s AND tm.meta_key = %s",
+            $taxonomy,
+            $metaKey,
+        ));
+
+        $groups = [];
+        foreach ($rows as $row) {
+            $termId = (int) $row->term_id;
+            $skwirrelId = (int) $row->skwirrel_id;
+            $lang = function_exists('pll_get_term_language')
+                ? (pll_get_term_language($termId, 'slug') ?: 'default')
+                : 'default';
+            $groups["{$skwirrelId}|{$lang}"][] = $termId;
+        }
+
+        $merged = 0;
+        $reassigned = 0;
+        foreach ($groups as $termIds) {
+            if (count($termIds) < 2) {
+                continue;
+            }
+            sort($termIds);
+            $keeper = (int) array_shift($termIds);
+            foreach ($termIds as $duplicate) {
+                $duplicate = (int) $duplicate;
+                $objects = get_objects_in_term($duplicate, $taxonomy);
+                if (is_array($objects)) {
+                    foreach ($objects as $postId) {
+                        $postId = (int) $postId;
+                        wp_set_object_terms($postId, [$keeper], $taxonomy, true);
+                        wp_remove_object_terms($postId, $duplicate, $taxonomy);
+                        $reassigned++;
+                    }
+                }
+                wp_delete_term($duplicate, $taxonomy);
+                $merged++;
+            }
+        }
+
+        set_transient('skwirrel_gavilar_admin_notice', [
+            'type' => 'success',
+            'message' => sprintf(
+                /* translators: 1: merged term count, 2: reassigned post count */
+                __('Cleanup: merged %1$d duplicate term(s), reassigned %2$d post link(s).', 'skwirrel-gavilar'),
+                $merged,
+                $reassigned,
+            ),
+        ], 30);
+
+        wp_safe_redirect(admin_url('options-general.php?page=' . self::PAGE_SLUG));
+        exit;
     }
 
     public function handleResetCursor(): void

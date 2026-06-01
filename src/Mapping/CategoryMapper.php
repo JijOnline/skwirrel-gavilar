@@ -79,19 +79,23 @@ final class CategoryMapper
 
     private function upsertOneTerm(int $skwirrelId, string $langSlug, string $name, int $parentTermId, ?int $existingTermId): int
     {
-        if ($existingTermId !== null) {
-            wp_update_term($existingTermId, CategoryTaxonomy::SLUG, [
-                'name' => $name,
-                'parent' => $parentTermId,
-            ]);
-            return $existingTermId;
-        }
-
-        // Avoid the "term already exists" collision Polylang relies on slug uniqueness across languages,
-        // so we append a language suffix to the slug for non-default languages.
+        // Slug is name-based (plus a language suffix for non-default langs to avoid
+        // cross-language collisions when Polylang's shared slugs is off).
         $slug = sanitize_title($name);
         if ($langSlug !== $this->polylang->defaultLanguage()) {
             $slug .= '-' . $langSlug;
+        }
+
+        if ($existingTermId !== null) {
+            // Update the slug too — early runs created terms with the "Category {id}"
+            // placeholder name and got slugs like "category-16". Now that we have
+            // the real name we want the URL to reflect it.
+            wp_update_term($existingTermId, CategoryTaxonomy::SLUG, [
+                'name' => $name,
+                'slug' => $slug,
+                'parent' => $parentTermId,
+            ]);
+            return $existingTermId;
         }
 
         $result = wp_insert_term($name, CategoryTaxonomy::SLUG, [
@@ -189,6 +193,11 @@ final class CategoryMapper
         $terms = get_terms([
             'taxonomy' => CategoryTaxonomy::SLUG,
             'hide_empty' => false,
+            // Without lang=>'' Polylang restricts get_terms to the current
+            // admin language, so the sync only finds one of the N translated
+            // terms per category and (mistakenly) creates the others fresh on
+            // every run, multiplying duplicates.
+            'lang' => '',
             'meta_query' => [
                 ['key' => self::META_KEY, 'value' => $skwirrelId],
             ],
@@ -206,7 +215,12 @@ final class CategoryMapper
             $lang = function_exists('pll_get_term_language')
                 ? (pll_get_term_language($term->term_id, 'slug') ?: $this->polylang->defaultLanguage())
                 : $this->polylang->defaultLanguage();
-            $byLang[$lang] = (int) $term->term_id;
+            // Keep the lowest-id term per language — older terms are typically
+            // the "real" ones; later duplicates from the bug above can be
+            // cleaned up separately.
+            if (!isset($byLang[$lang]) || $term->term_id < $byLang[$lang]) {
+                $byLang[$lang] = (int) $term->term_id;
+            }
         }
         return $byLang;
     }
