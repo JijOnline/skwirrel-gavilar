@@ -40,12 +40,21 @@ final class CategoryMapper
 
         $termIdsByLang = [];
         foreach ($this->polylang->languages() as $slug) {
-            // Skwirrel may return no category name — fall back to a stable placeholder
-            // ("Category 14"). The term stays linked by _skwirrel_category_id, so once
-            // real names are available a later sync renames it in place.
+            // Prefer the matching translation, then the default language, then
+            // any translation that exists, before the generic placeholder. So
+            // when Skwirrel only has Dutch filled in, English/French posts
+            // still get the Dutch name instead of "Category 18".
             $name = $namesByLang[$slug] ?? '';
             if ($name === '') {
                 $name = $namesByLang[$this->polylang->defaultLanguage()] ?? '';
+            }
+            if ($name === '') {
+                foreach ($namesByLang as $candidate) {
+                    if ($candidate !== '') {
+                        $name = $candidate;
+                        break;
+                    }
+                }
             }
             if ($name === '') {
                 $name = sprintf('Category %d', $skwirrelId);
