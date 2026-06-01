@@ -120,27 +120,56 @@ final class CategoryMapper
                 break;
             }
         }
-        $namesByLang = [$defaultLang => $defaultName];
+        $namesByLang = $defaultName !== '' ? [$defaultLang => $defaultName] : [];
 
         $translations = $category['_category_translations'] ?? $category['translations'] ?? [];
         if (is_array($translations)) {
             foreach ($translations as $localeKey => $translation) {
-                $localeCode = is_array($translation)
-                    ? (string) ($translation['language'] ?? $translation['locale'] ?? $localeKey)
-                    : (string) $localeKey;
-                $slug = $this->polylang->resolveSlug($localeCode);
+                if (!is_array($translation)) {
+                    continue;
+                }
+                $slug = $this->slugForTranslation($translation, $localeKey);
                 if ($slug === null) {
                     continue;
                 }
-                $name = is_array($translation)
-                    ? (string) ($translation['name'] ?? $translation['category_description'] ?? $translation['description'] ?? '')
-                    : (string) $translation;
+                $name = '';
+                foreach (['name', 'category_name', 'product_category_name', 'category_description', 'product_category_description', 'description', 'title'] as $field) {
+                    if (!empty($translation[$field]) && is_scalar($translation[$field])) {
+                        $name = (string) $translation[$field];
+                        break;
+                    }
+                }
                 if ($name !== '') {
                     $namesByLang[$slug] = $name;
                 }
             }
         }
         return $namesByLang;
+    }
+
+    /**
+     * @param array<string, mixed> $translation
+     */
+    private function slugForTranslation(array $translation, mixed $key): ?string
+    {
+        foreach (['language', 'language_code', 'locale', 'code'] as $field) {
+            if (!empty($translation[$field])) {
+                $slug = $this->polylang->resolveSlug((string) $translation[$field]);
+                if ($slug !== null) {
+                    return $slug;
+                }
+            }
+        }
+        if (isset($translation['context_id'])) {
+            $slug = $this->polylang->resolveSlug((string) $translation['context_id']);
+            if ($slug !== null) {
+                return $slug;
+            }
+        }
+        if (is_string($key) && $key !== '') {
+            return $this->polylang->resolveSlug($key);
+        }
+        return null;
     }
 
     /**

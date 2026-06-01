@@ -148,9 +148,11 @@ final class SyncCoordinator
      */
     private function fetchAndApplyPage(?string $since, int $page, string $runId, string $mode): array
     {
-        // Only documented getProducts include_* flags. "include_languages" rejects
-        // a boolean value, and "include_custom_features" is not a real parameter
-        // (custom features come from separate Skwirrel methods) — both omitted.
+        // include_languages is a string[] of language codes (e.g. ["nl","en"]),
+        // not a boolean — and the translation / SEO flags require it. Send the
+        // full Polylang language list so every configured locale comes back.
+        $languages = $this->polylang->languages();
+
         $params = [
             'page' => $page,
             'limit' => self::PAGE_SIZE,
@@ -159,6 +161,7 @@ final class SyncCoordinator
             'include_product_translations' => true,
             'include_product_seo' => true,
             'include_attachments' => true,
+            'include_languages' => $languages,
         ];
 
         // Optional gating filter — Gavilar gates by status, not a selection.
@@ -276,7 +279,15 @@ final class SyncCoordinator
         }
 
         try {
-            $result = $this->client->call('getCategories', ['page' => 1, 'limit' => 1000]);
+            $result = $this->client->call('getCategories', [
+                'page' => 1,
+                'limit' => 1000,
+                // Names + SEO live in translations and both flags require
+                // include_languages to be present.
+                'include_category_translations' => true,
+                'include_category_seo' => true,
+                'include_languages' => $this->polylang->languages(),
+            ]);
         } catch (\Throwable $e) {
             $this->logger->error('getCategories failed', ['error' => $e->getMessage()]);
             return $this->categoryIndex = [];

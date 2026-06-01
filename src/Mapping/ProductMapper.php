@@ -187,28 +187,39 @@ final class ProductMapper
     }
 
     /**
-     * Resolve Skwirrel translations to a map keyed by Polylang language slug.
+     * Resolve Skwirrel translations + SEO to a map keyed by Polylang language slug.
+     *
+     * Skwirrel keeps content translations (name, description) in
+     * _product_translations and SEO (seo_title, seo_description, seo_url) in a
+     * separate _product_seo array. Both are per-language. We merge them into
+     * one object per language so writePost / writeSeoMeta can read everything
+     * from a single $translation.
      *
      * @param array<string, mixed> $product
-     * @return array<string, array<string, mixed>> slug => translation payload
+     * @return array<string, array<string, mixed>> slug => merged translation payload
      */
     private function resolveTranslationsByLang(array $product): array
     {
         $byLang = [];
-        $translations = $product['_product_translations'] ?? $product['translations'] ?? [];
-
-        if (is_array($translations)) {
-            foreach ($translations as $localeKey => $translation) {
-                if (!is_array($translation)) {
+        $merge = static function (array &$byLang, mixed $entries, callable $slugFor): void {
+            if (!is_array($entries)) {
+                return;
+            }
+            foreach ($entries as $key => $entry) {
+                if (!is_array($entry)) {
                     continue;
                 }
-                $localeCode = (string) ($translation['language'] ?? $translation['locale'] ?? $translation['context'] ?? $localeKey);
-                $slug = $this->polylang->resolveSlug($localeCode);
-                if ($slug !== null) {
-                    $byLang[$slug] = $translation;
+                $slug = $slugFor($entry, $key);
+                if ($slug === null) {
+                    continue;
                 }
+                $byLang[$slug] = array_merge($byLang[$slug] ?? [], $entry);
             }
-        }
+        };
+
+        $slugFor = fn (array $entry, mixed $key): ?string => $this->slugForEntry($entry, $key);
+        $merge($byLang, $product['_product_translations'] ?? $product['translations'] ?? null, $slugFor);
+        $merge($byLang, $product['_product_seo'] ?? null, $slugFor);
 
         // No usable translations (Gavilar's current state) — one post in the default language.
         if (empty($byLang)) {
@@ -216,6 +227,35 @@ final class ProductMapper
         }
 
         return $byLang;
+    }
+
+    /**
+     * Map a per-language Skwirrel record (translation/SEO) to a Polylang slug.
+     * Skwirrel may carry the language as a code string, as a numeric context_id,
+     * or fall back to the array key from the parent payload.
+     *
+     * @param array<string, mixed> $entry
+     */
+    private function slugForEntry(array $entry, mixed $key): ?string
+    {
+        foreach (['language', 'language_code', 'locale', 'code'] as $field) {
+            if (!empty($entry[$field])) {
+                $slug = $this->polylang->resolveSlug((string) $entry[$field]);
+                if ($slug !== null) {
+                    return $slug;
+                }
+            }
+        }
+        if (isset($entry['context_id'])) {
+            $slug = $this->polylang->resolveSlug((string) $entry['context_id']);
+            if ($slug !== null) {
+                return $slug;
+            }
+        }
+        if (is_string($key) && $key !== '') {
+            return $this->polylang->resolveSlug($key);
+        }
+        return null;
     }
 
     /**

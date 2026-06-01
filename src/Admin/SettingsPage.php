@@ -563,6 +563,7 @@ final class SettingsPage
         check_admin_referer(self::NONCE_ACTION);
 
         $flags = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+        $languages = $this->polylang->languages();
         $dump = [];
 
         try {
@@ -574,6 +575,7 @@ final class SettingsPage
                 'include_product_translations' => true,
                 'include_product_seo' => true,
                 'include_attachments' => true,
+                'include_languages' => $languages,
             ]);
             $dump['getProducts (1)'] = (string) wp_json_encode($product, $flags);
         } catch (\Throwable $e) {
@@ -581,7 +583,13 @@ final class SettingsPage
         }
 
         try {
-            $categories = $this->client->call('getCategories', ['page' => 1, 'limit' => 5]);
+            $categories = $this->client->call('getCategories', [
+                'page' => 1,
+                'limit' => 5,
+                'include_category_translations' => true,
+                'include_category_seo' => true,
+                'include_languages' => $languages,
+            ]);
             $dump['getCategories (5)'] = (string) wp_json_encode($categories, $flags);
         } catch (\Throwable $e) {
             $dump['getCategories (5)'] = 'ERROR: ' . $e->getMessage();
