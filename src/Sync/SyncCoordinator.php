@@ -5,6 +5,7 @@ namespace JijOnline\SkwirrelGavilar\Sync;
 
 use JijOnline\SkwirrelGavilar\Api\Client;
 use JijOnline\SkwirrelGavilar\Cpt\ProductPostType;
+use JijOnline\SkwirrelGavilar\I18n\Polylang;
 use JijOnline\SkwirrelGavilar\Mapping\ProductMapper;
 use JijOnline\SkwirrelGavilar\Support\Logger;
 use JijOnline\SkwirrelGavilar\Support\Settings;
@@ -26,6 +27,7 @@ final class SyncCoordinator
         private readonly Client $client,
         private readonly ProductMapper $productMapper,
         private readonly Settings $settings,
+        private readonly Polylang $polylang,
         private readonly Logger $logger,
     ) {}
 

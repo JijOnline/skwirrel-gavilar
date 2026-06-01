@@ -80,7 +80,7 @@ final class Plugin
         $attachmentMapper = new AttachmentMapper($logger);
         $productMapper = new ProductMapper($categoryMapper, $featureMapper, $attachmentMapper, $this->polylang, $logger);
 
-        $this->coordinator = new SyncCoordinator($this->client, $productMapper, $settings, $logger);
+        $this->coordinator = new SyncCoordinator($this->client, $productMapper, $settings, $this->polylang, $logger);
     }
 
     public function polylang(): Polylang
