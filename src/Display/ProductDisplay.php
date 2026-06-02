@@ -122,6 +122,63 @@ final class ProductDisplay
             );
         }
 
+        // Featured image, gallery and documents — surfaced so the synced
+        // media is visible in the editor without diving into the database.
+        $featuredId = (int) get_post_thumbnail_id($postId);
+        if ($featuredId > 0) {
+            $rows[(string) __('Featured image', 'skwirrel-gavilar')] = (string) wp_get_attachment_image(
+                $featuredId,
+                [80, 80],
+                false,
+                ['style' => 'border:1px solid #ddd;']
+            );
+        }
+
+        $galleryIds = get_post_meta($postId, '_pim_gallery_ids', true);
+        if (is_array($galleryIds) && !empty($galleryIds)) {
+            $thumbs = '';
+            foreach ($galleryIds as $attId) {
+                $thumbs .= wp_get_attachment_image(
+                    (int) $attId,
+                    [60, 60],
+                    false,
+                    ['style' => 'margin:2px;border:1px solid #ddd;']
+                );
+            }
+            $rows[(string) __('Gallery', 'skwirrel-gavilar')] = sprintf(
+                '%d %s<br>%s',
+                count($galleryIds),
+                esc_html__('image(s)', 'skwirrel-gavilar'),
+                $thumbs,
+            );
+        }
+
+        $documents = get_post_meta($postId, '_pim_documents', true);
+        if (is_array($documents) && !empty($documents)) {
+            $links = [];
+            foreach ($documents as $doc) {
+                if (!is_array($doc) || empty($doc['id'])) {
+                    continue;
+                }
+                $attUrl = wp_get_attachment_url((int) $doc['id']);
+                if (!$attUrl) {
+                    continue;
+                }
+                $label = (string) ($doc['label'] ?? '');
+                if ($label === '') {
+                    $label = basename($attUrl);
+                }
+                $links[] = sprintf(
+                    '<a href="%s" target="_blank" rel="noopener">%s</a>',
+                    esc_url($attUrl),
+                    esc_html($label),
+                );
+            }
+            if (!empty($links)) {
+                $rows[(string) __('Documents', 'skwirrel-gavilar')] = implode('<br>', $links);
+            }
+        }
+
         return $rows;
     }
 }
