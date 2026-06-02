@@ -10,6 +10,40 @@ final class ProductPostType
     public function register(): void
     {
         add_action('init', [$this, 'registerPostType'], 5);
+        add_action('pre_get_posts', [$this, 'enhanceAdminSearch']);
+    }
+
+    /**
+     * The default admin search only hits post_title / post_content / post_excerpt.
+     * Skwirrel product codes (manufacturer code, internal code, GTIN, external id)
+     * live in meta — searching for "27613" in PIM products → 0 results. When the
+     * query term looks like a code (no spaces, alnum + dashes only) we redirect
+     * the search to the relevant meta keys instead.
+     */
+    public function enhanceAdminSearch(\WP_Query $query): void
+    {
+        if (!is_admin() || !$query->is_main_query()) {
+            return;
+        }
+        if ($query->get('post_type') !== self::SLUG) {
+            return;
+        }
+        $term = trim((string) $query->get('s'));
+        if ($term === '' || !preg_match('/^[A-Z0-9\-_.]+$/i', $term)) {
+            return;
+        }
+
+        $query->set('s', '');
+        $existing = $query->get('meta_query') ?: [];
+        $existing[] = [
+            'relation' => 'OR',
+            ['key' => '_pim_manufacturer_code', 'value' => $term, 'compare' => 'LIKE'],
+            ['key' => '_pim_internal_code', 'value' => $term, 'compare' => 'LIKE'],
+            ['key' => '_pim_gtin', 'value' => $term, 'compare' => 'LIKE'],
+            ['key' => '_skwirrel_external_product_id', 'value' => $term, 'compare' => 'LIKE'],
+            ['key' => '_skwirrel_product_id', 'value' => $term, 'compare' => '='],
+        ];
+        $query->set('meta_query', $existing);
     }
 
     public function registerPostType(): void
