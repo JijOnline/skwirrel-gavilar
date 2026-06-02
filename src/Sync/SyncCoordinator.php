@@ -164,6 +164,8 @@ final class SyncCoordinator
             'include_product_seo' => true,
             'include_attachments' => true,
             'include_languages' => $languages,
+            'include_etim' => true,
+            'include_etim_translations' => true,
         ];
 
         // Optional gating filter — Gavilar gates by status, not a selection.

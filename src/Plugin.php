@@ -14,6 +14,7 @@ use JijOnline\SkwirrelGavilar\Display\ProductDisplay;
 use JijOnline\SkwirrelGavilar\I18n\Polylang;
 use JijOnline\SkwirrelGavilar\Mapping\AttachmentMapper;
 use JijOnline\SkwirrelGavilar\Mapping\CategoryMapper;
+use JijOnline\SkwirrelGavilar\Mapping\EtimMapper;
 use JijOnline\SkwirrelGavilar\Mapping\FeatureMapper;
 use JijOnline\SkwirrelGavilar\Mapping\ProductMapper;
 use JijOnline\SkwirrelGavilar\Support\Logger;
@@ -78,7 +79,8 @@ final class Plugin
         $categoryMapper = new CategoryMapper($this->polylang);
         $featureMapper = new FeatureMapper();
         $attachmentMapper = new AttachmentMapper($logger);
-        $productMapper = new ProductMapper($categoryMapper, $featureMapper, $attachmentMapper, $this->polylang, $logger);
+        $etimMapper = new EtimMapper();
+        $productMapper = new ProductMapper($categoryMapper, $featureMapper, $attachmentMapper, $etimMapper, $this->polylang, $logger);
 
         $this->coordinator = new SyncCoordinator($this->client, $productMapper, $settings, $this->polylang, $logger);
     }

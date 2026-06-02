@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace JijOnline\SkwirrelGavilar\Display;
 
 use JijOnline\SkwirrelGavilar\Cpt\ProductPostType;
+use JijOnline\SkwirrelGavilar\Mapping\EtimMapper;
 use JijOnline\SkwirrelGavilar\Mapping\ProductMapper;
 
 /**
@@ -35,19 +36,28 @@ final class ProductDisplay
     public function renderMetaBox(\WP_Post $post): void
     {
         $rows = $this->fields($post->ID);
-        if (empty($rows)) {
+        if (!empty($rows)) {
+            echo '<table class="widefat striped"><tbody>';
+            foreach ($rows as $label => $value) {
+                printf(
+                    '<tr><th style="width:220px;text-align:left;">%s</th><td>%s</td></tr>',
+                    esc_html($label),
+                    wp_kses_post($value),
+                );
+            }
+            echo '</tbody></table>';
+        }
+
+        $etimHtml = $this->renderEtimHtml($post->ID, /* heading: */ true);
+        if ($etimHtml !== '') {
+            echo $etimHtml;
+        }
+
+        if (empty($rows) && $etimHtml === '') {
             echo '<p>' . esc_html__('No PIM data synced for this product yet.', 'skwirrel-gavilar') . '</p>';
             return;
         }
-        echo '<table class="widefat striped"><tbody>';
-        foreach ($rows as $label => $value) {
-            printf(
-                '<tr><th style="width:220px;text-align:left;">%s</th><td>%s</td></tr>',
-                esc_html($label),
-                wp_kses_post($value),
-            );
-        }
-        echo '</tbody></table>';
+
         echo '<p class="description">' . esc_html__('Read-only — managed by the Skwirrel sync. Edits here are overwritten on the next sync.', 'skwirrel-gavilar') . '</p>';
     }
 
@@ -58,23 +68,98 @@ final class ProductDisplay
         }
         $postId = (int) get_the_ID();
         $rows = $this->fields($postId);
-        if (empty($rows)) {
+        $etimHtml = $this->renderEtimHtml($postId, /* heading: */ true);
+
+        if (empty($rows) && $etimHtml === '') {
             return $content;
         }
 
         $html = '<div class="pim-product-specs">';
-        $html .= '<h2>' . esc_html__('Specifications', 'skwirrel-gavilar') . '</h2>';
-        $html .= '<table class="pim-product-specs__table">';
-        foreach ($rows as $label => $value) {
-            $html .= sprintf(
-                '<tr><th scope="row">%s</th><td>%s</td></tr>',
-                esc_html($label),
-                wp_kses_post($value),
-            );
+        if (!empty($rows)) {
+            $html .= '<h2>' . esc_html__('Specifications', 'skwirrel-gavilar') . '</h2>';
+            $html .= '<table class="pim-product-specs__table">';
+            foreach ($rows as $label => $value) {
+                $html .= sprintf(
+                    '<tr><th scope="row">%s</th><td>%s</td></tr>',
+                    esc_html($label),
+                    wp_kses_post($value),
+                );
+            }
+            $html .= '</table>';
         }
-        $html .= '</table></div>';
+        $html .= $etimHtml;
+        $html .= '</div>';
 
         return $content . $html;
+    }
+
+    /**
+     * Render the stored ETIM blocks. Returns an empty string if there's nothing.
+     * Used by both the metabox and the front-end content filter.
+     */
+    private function renderEtimHtml(int $postId, bool $withHeading): string
+    {
+        $etim = get_post_meta($postId, '_pim_etim', true);
+        if (!is_array($etim) || empty($etim)) {
+            return '';
+        }
+
+        $displayLang = $this->displayLanguage();
+        $defaultLang = function_exists('pll_default_language')
+            ? (string) pll_default_language('slug')
+            : 'en';
+
+        $html = '';
+        if ($withHeading) {
+            $html .= '<h3 style="margin-top:1.5em;">' . esc_html__('ETIM technical features', 'skwirrel-gavilar') . '</h3>';
+        }
+
+        foreach ($etim as $class) {
+            if (!is_array($class) || empty($class['features'])) {
+                continue;
+            }
+            $classLabel = EtimMapper::pickLabel((array) ($class['class_label_by_lang'] ?? []), $displayLang, $defaultLang);
+            $classCode = (string) ($class['class_code'] ?? '');
+
+            $html .= '<div class="pim-etim-class" style="margin-bottom:1em;">';
+            if ($classLabel !== '' || $classCode !== '') {
+                $caption = $classLabel !== '' ? $classLabel : $classCode;
+                if ($classLabel !== '' && $classCode !== '') {
+                    $caption .= ' (' . $classCode . ')';
+                }
+                $html .= '<p style="margin:0 0 4px;"><strong>' . esc_html($caption) . '</strong></p>';
+            }
+            $html .= '<table class="widefat striped pim-etim-class__table"><tbody>';
+            foreach ((array) $class['features'] as $feature) {
+                if (!is_array($feature)) {
+                    continue;
+                }
+                $formatted = EtimMapper::format($feature, $displayLang, $defaultLang);
+                if ($formatted['label'] === '' && $formatted['value'] === '') {
+                    continue;
+                }
+                $html .= sprintf(
+                    '<tr><th scope="row" style="width:220px;text-align:left;">%s</th><td>%s</td></tr>',
+                    esc_html($formatted['label']),
+                    esc_html($formatted['value']),
+                );
+            }
+            $html .= '</tbody></table></div>';
+        }
+        return $html;
+    }
+
+    /** Best-effort current display language slug (Polylang, or WP locale fallback). */
+    private function displayLanguage(): string
+    {
+        if (function_exists('pll_current_language')) {
+            $slug = pll_current_language('slug');
+            if (is_string($slug) && $slug !== '') {
+                return $slug;
+            }
+        }
+        $locale = get_locale();
+        return substr($locale, 0, 2) ?: 'en';
     }
 
     /**

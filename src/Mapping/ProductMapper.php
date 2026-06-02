@@ -33,6 +33,7 @@ final class ProductMapper
         private readonly CategoryMapper $categoryMapper,
         private readonly FeatureMapper $featureMapper,
         private readonly AttachmentMapper $attachmentMapper,
+        private readonly EtimMapper $etimMapper,
         private readonly Polylang $polylang,
         private readonly Logger $logger,
     ) {}
@@ -147,6 +148,13 @@ final class ProductMapper
         }
         update_post_meta($postId, self::META_LAST_RUN_ID, $runId);
         $this->writeProductMeta($postId, $product);
+
+        $etim = $this->etimMapper->build($product['_etim'] ?? []);
+        if (!empty($etim)) {
+            update_post_meta($postId, '_pim_etim', $etim);
+        } else {
+            delete_post_meta($postId, '_pim_etim');
+        }
 
         return $postId;
     }
