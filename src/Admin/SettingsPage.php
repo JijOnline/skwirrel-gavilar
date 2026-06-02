@@ -191,6 +191,7 @@ final class SettingsPage
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block; margin-right:1em;">
                 <?php wp_nonce_field(self::NONCE_ACTION); ?>
                 <input type="hidden" name="action" value="skwirrel_gavilar_sample_product">
+                <input type="text" name="sample_code" placeholder="<?php esc_attr_e('Product code (optional)', 'skwirrel-gavilar'); ?>" style="vertical-align:middle;" size="20">
                 <?php submit_button(__('Show sample product', 'skwirrel-gavilar'), 'secondary', 'submit', false); ?>
             </form>
 
@@ -571,22 +572,32 @@ final class SettingsPage
 
         $flags = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
         $languages = $this->polylang->languages();
+        $code = isset($_POST['sample_code']) ? sanitize_text_field(wp_unslash((string) $_POST['sample_code'])) : '';
         $dump = [];
 
+        $productParams = [
+            'page' => 1,
+            'limit' => 1,
+            'include_product_status' => true,
+            'include_categories' => true,
+            'include_product_translations' => true,
+            'include_product_seo' => true,
+            'include_attachments' => true,
+            'include_languages' => $languages,
+            'include_etim' => true,
+            'include_etim_translations' => true,
+        ];
+        if ($code !== '') {
+            // code is a multi-key identifier filter (product_id / external_product_id / GTIN / …).
+            $productParams['code'] = [$code];
+        }
+
         try {
-            $product = $this->client->call('getProducts', [
-                'page' => 1,
-                'limit' => 1,
-                'include_product_status' => true,
-                'include_categories' => true,
-                'include_product_translations' => true,
-                'include_product_seo' => true,
-                'include_attachments' => true,
-                'include_languages' => $languages,
-            ]);
-            $dump['getProducts (1)'] = (string) wp_json_encode($product, $flags);
+            $product = $this->client->call('getProducts', $productParams);
+            $label = $code !== '' ? sprintf('getProducts code=%s', $code) : 'getProducts (1)';
+            $dump[$label] = (string) wp_json_encode($product, $flags);
         } catch (\Throwable $e) {
-            $dump['getProducts (1)'] = 'ERROR: ' . $e->getMessage();
+            $dump['getProducts'] = 'ERROR: ' . $e->getMessage();
         }
 
         try {
@@ -600,6 +611,17 @@ final class SettingsPage
             $dump['getCategories (5)'] = (string) wp_json_encode($categories, $flags);
         } catch (\Throwable $e) {
             $dump['getCategories (5)'] = 'ERROR: ' . $e->getMessage();
+        }
+
+        try {
+            $etim = $this->client->call('getDenormalizedEtimData', [
+                'page' => 1,
+                'limit' => 25,
+                'include_languages' => $languages,
+            ]);
+            $dump['getDenormalizedEtimData (25)'] = (string) wp_json_encode($etim, $flags);
+        } catch (\Throwable $e) {
+            $dump['getDenormalizedEtimData (25)'] = 'ERROR: ' . $e->getMessage();
         }
 
         set_transient('skwirrel_gavilar_sample_product', $dump, 15 * MINUTE_IN_SECONDS);
