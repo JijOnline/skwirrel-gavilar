@@ -3,7 +3,7 @@ Contributors: jijonline
 Requires at least: 6.4
 Tested up to: 6.5
 Requires PHP: 8.1
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv2 or later
 
 One-way sync of products from Skwirrel PIM into a custom post type.
@@ -26,3 +26,12 @@ Syncs products, categories, custom features and attachments from the Skwirrel PI
 * PHP 8.1+
 * Polylang Pro (active and configured with site languages)
 * Yoast SEO (for SEO meta — optional but recommended)
+
+== Changelog ==
+
+= 0.1.1 =
+* Import product description (`product_long_description` → post content) and summary (`product_description` → post excerpt) from Skwirrel.
+* Add Git Updater headers (GitHub Plugin URI, Primary Branch) so the plugin can update via Git Updater.
+
+= 0.1.0 =
+* Initial release.

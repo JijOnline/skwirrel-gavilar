@@ -2,19 +2,21 @@
 /**
  * Plugin Name:       Skwirrel Sync for Gavilar
  * Description:       One-way sync of products, categories, custom features and attachments from the Skwirrel PIM into a custom post type.
- * Version:           0.1.0
+ * Version:           0.1.1
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Jij Online
  * License:           GPL-2.0-or-later
  * Text Domain:       skwirrel-gavilar
+ * GitHub Plugin URI: JijOnline/skwirrel-gavilar
+ * Primary Branch:    main
  */
 
 declare(strict_types=1);
 
 defined('ABSPATH') || exit;
 
-define('SKWIRREL_GAVILAR_VERSION', '0.1.0');
+define('SKWIRREL_GAVILAR_VERSION', '0.1.1');
 define('SKWIRREL_GAVILAR_FILE', __FILE__);
 define('SKWIRREL_GAVILAR_DIR', __DIR__);
 
