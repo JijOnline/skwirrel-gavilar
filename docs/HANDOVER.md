@@ -187,3 +187,8 @@ the raw JSON. Don't guess.
 A: Antagonist IP whitelist expired or your IP changed. Re-add via the
 `wijonline` Antagonist panel, 365-day expiry. PROJECT-STATUS.md
 documents this.
+
+**Q: `/fr/product/...` or `/en/product/...` URLs 404 while `/product/...`
+works.**
+A: Rewrite rules weren't regenerated after a Polylang change. Go to
+Settings → Permalinks → Save (no edits needed). Confirmed fix.

@@ -234,6 +234,16 @@ Any meta key starting with `_` (which all of ours do) is hidden from
 the default Custom Fields panel — even when enabled. That's why the
 plugin ships a dedicated metabox.
 
+### Adding a Polylang language → flush rewrites
+When a new language is added in Polylang after the CPT was registered
+(or when Polylang's "Custom post types" setting is changed), the
+`/en/product/...` / `/fr/product/...` permalinks return 404 until
+rewrite rules are regenerated.
+
+Fix: WP-admin → Settings → Permalinks → Save (no fields need to
+change). This rebuilds rewrites and the per-language CPT URLs work.
+Common after onboarding a new translation locale.
+
 ---
 
 ## Open items — who is waiting on whom
