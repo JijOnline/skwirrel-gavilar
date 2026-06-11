@@ -113,8 +113,14 @@ final class ProductMapper
     private function writePost(int $skwirrelId, string $langSlug, array $product, array $translation, string $runId, ?int $existingId): int
     {
         $title = $this->resolveTitle($product, $translation);
-        $description = (string) ($translation['description'] ?? $translation['long_description'] ?? '');
-        $excerpt = (string) ($translation['short_description'] ?? '');
+        // Skwirrel content translation fields, confirmed against a real getProducts
+        // response: product_long_description is the full description (→ body) and
+        // product_description is the short summary line (→ excerpt). Sanitised as
+        // post HTML so safe markup survives but scripts are stripped.
+        $description = (string) ($translation['product_long_description'] ?? '');
+        $excerpt = (string) ($translation['product_description'] ?? '');
+        $description = $description !== '' ? wp_kses_post($description) : '';
+        $excerpt = $excerpt !== '' ? wp_kses_post($excerpt) : '';
         $slug = $this->buildSlug($product, $translation, $title, $langSlug);
 
         $postData = [
