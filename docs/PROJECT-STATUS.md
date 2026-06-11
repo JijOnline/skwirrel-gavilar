@@ -385,19 +385,88 @@ right one per Polylang language.
 
 ---
 
-## A note on AI sessions
+## Working with Claude Code on this project
 
-This project was substantially built in Claude Code sessions. Sessions
-have a context window — at some point the chat history outgrows
-practical limits. This file (and the README) are the **durable** record
-of decisions. Future sessions or developers should be able to read
-both, glance at the git log for the chronology, and pick up productively
-without replaying the whole conversation.
+This project was substantially built in Claude Code sessions, and the
+expectation is that future maintenance happens the same way. The
+patterns below cost real time to discover; following them keeps a new
+session productive and avoids re-litigating things that are already
+settled.
 
-When a session is getting unwieldy, the playbook:
+### Open a fresh session for each new piece of work
 
-1. Make sure this file reflects any new decisions or gotchas.
+Don't keep a single session running across days. Token cost grows with
+the transcript and the chance of confusion grows with it. Frontend
+work, plugin tweaks, debugging — each gets its own fresh session.
+
+### Standard opening prompt
+
+For any session that touches the plugin:
+
+```
+Read docs/PROJECT-STATUS.md, docs/THEME-INTEGRATION.md, and README.md
+in this repo. Wait for instructions.
+```
+
+That loads all the durable knowledge — locked decisions, API gotchas,
+data shapes — for the price of a few KB of context. Then state the
+actual task.
+
+### Treat the gotcha list as load-bearing
+
+The numbered gotchas in [Skwirrel API gotchas](#skwirrel-api-gotchas-—-read-before-touching-the-api-layer)
+and [WordPress / Polylang gotchas](#wordpress--polylang-gotchas) are
+settled. Each one cost a debug cycle to find. If Claude starts a new
+theory that contradicts one of them ("maybe `include_languages: true`
+will work this time"), interrupt and point at the gotcha. Don't
+re-litigate; they were verified against real behaviour.
+
+### "Check before guess" — the docs rule
+
+Skwirrel's API documentation has thin response-shape coverage. Before
+writing or editing a mapper, get a real response sample. The
+**Show sample product** admin button on
+*Settings → Skwirrel Sync* dumps:
+
+- `getProducts` (optionally filtered by code) with all the include
+  flags the sync uses,
+- `getCategories` with translations,
+- `getDenormalizedEtimData`.
+
+Ask Claude to wait for the dump before writing code that touches the
+shape of a response. Multiple wrong-turn fixes earlier in the project
+came from guessing field names instead of inspecting first.
+
+### After schema or mapper changes — Full resync
+
+The daily delta sync only touches products whose `product_updated_on`
+moved. If you change a mapper, add a meta field, or start requesting
+new include flags, *existing* posts won't get the new data on the next
+delta — only changed Skwirrel records would. **Always Full resync** in
+*Settings → Skwirrel Sync* after a behaviour change that affects all
+products. 390 products with images takes ~10–15 minutes; safe to run
+repeatedly.
+
+### Bump the effort slider for unfamiliar work
+
+Routine edits (rename a meta key, add a field to the metabox) work fine
+at default effort. Bump higher when:
+
+- Debugging an unfamiliar Skwirrel response.
+- Architectural changes touching multiple mappers or the sync flow.
+- A bug that doesn't yield to the first round of fixes — that's the
+  signal to think harder, not to keep retrying.
+
+### Keep this file alive
+
+When you discover a new gotcha, lock a new decision, or close a "wait
+on X" item, update the relevant section in this file. The doc is the
+durable knowledge base; this conversation is not.
+
+### When a session does get too long
+
+1. Update this file with anything new the session settled.
 2. Commit + push.
-3. Either `/compact` the current session, or start fresh with
-   "read `docs/PROJECT-STATUS.md` and the README, then wait for
-   instructions."
+3. Either `/compact` (built into Claude Code — summarises older turns
+   while keeping the recent ones) or start fresh with the standard
+   opening prompt above.
